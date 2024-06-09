@@ -2,15 +2,16 @@ use bitflags::bitflags;
 use std::collections::{BTreeMap, HashMap};
 use std::str::FromStr;
 use thiserror::Error;
+use hifitime::Duration;
 
 use crate::{
-    epoch, merge, merge::Merge, prelude::*, split, split::Split, types::Type, version::Version,
+    epoch, prelude::*, split, split::Split, types::Type, version::Version,
     Carrier, Observable,
+    observation::{EpochFlag, SNR},
 };
 
-use crate::observation::EpochFlag;
-use crate::observation::SNR;
-use hifitime::Duration;
+#[cfg(feature = "qc")]
+use qc_traits::context::{Merge, MergeError};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -766,15 +767,14 @@ fn fmt_epoch_v2(
     lines
 }
 
+#[cfg(feature = "qc")]
 impl Merge for Record {
-    /// Merge `rhs` into `Self`
-    fn merge(&self, rhs: &Self) -> Result<Self, merge::Error> {
+    fn merge(&self, rhs: &Self) -> Result<Self, MergeError> {
         let mut lhs = self.clone();
         lhs.merge_mut(rhs)?;
         Ok(lhs)
     }
-    /// Merge `rhs` into `Self`
-    fn merge_mut(&mut self, rhs: &Self) -> Result<(), merge::Error> {
+    fn merge_mut(&mut self, rhs: &Self) -> Result<(), MergeError> {
         for (rhs_epoch, (rhs_clk, rhs_vehicles)) in rhs {
             if let Some((clk, vehicles)) = self.get_mut(rhs_epoch) {
                 // exact epoch (both timestamp and flag) did exist

@@ -11,10 +11,6 @@ use crate::{
     leap::{Error as LeapParsingError, Leap},
     linspace::{Error as LinspaceError, Linspace},
     marker::{GeodeticMarker, MarkerType},
-    merge::{
-        merge_mut_option, merge_mut_unique_map2d, merge_mut_unique_vec, merge_mut_vec,
-        merge_time_of_first_obs, merge_time_of_last_obs, Error as MergeError, Merge,
-    },
     meteo,
     meteo::HeaderFields as MeteoHeader,
     navigation::{IonMessage, KbModel},
@@ -26,6 +22,12 @@ use crate::{
     types::Type,
     version::Version,
 };
+    
+#[cfg(feature = "qc")]
+use qc_traits::context::{Merge, MergeError, util::*};
+
+#[cfg(feature = "qc")]
+use crate::merge_util::*;
 
 use std::collections::HashMap;
 use std::io::prelude::*;
@@ -1998,6 +2000,7 @@ impl std::fmt::Display for Header {
     }
 }
 
+#[cfg(feature = "qc")]
 impl Header {
     /*
      * Macro to be used when marking Self as Merged file
@@ -2018,6 +2021,7 @@ impl Header {
     }
 }
 
+#[cfg(feature = "qc")]
 impl Merge for Header {
     /// Merges `rhs` into `Self` without mutable access, at the expense of memcopies
     fn merge(&self, rhs: &Self) -> Result<Self, MergeError> {

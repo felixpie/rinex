@@ -6,7 +6,6 @@
 extern crate gnss_rs as gnss;
 
 #[cfg(feature = "qc")]
-#[macro_use]
 extern crate rinex_qc_traits as qc_traits;
 
 pub mod antex;
@@ -20,7 +19,6 @@ pub mod hatanaka;
 pub mod header;
 pub mod ionex;
 pub mod marker;
-pub mod merge;
 pub mod meteo;
 pub mod navigation;
 pub mod observation;
@@ -36,6 +34,9 @@ mod leap; // leap second
 mod linspace; // grid and linear spacing
 mod observable;
 mod production; // RINEX production infrastructure // physical observations
+
+#[cfg(feature = "qc")]
+pub(crate) mod merge_util;
 
 #[cfg(test)]
 mod tests;
@@ -79,6 +80,9 @@ use production::{DataSource, DetailedProductionAttributes, ProductionAttributes,
 use hifitime::Unit;
 //use hifitime::{efmt::Format as EpochFormat, efmt::Formatter as EpochFormatter, Duration, Unit};
 
+#[cfg(feature = "qc")]
+use qc_traits::context::{Merge, MergeError};
+
 /// Package to include all basic structures
 pub mod prelude {
     #[cfg(feature = "antex")]
@@ -118,7 +122,6 @@ pub mod preprocessing {
 use carrier::Carrier;
 use prelude::*;
 
-pub use merge::Merge;
 pub use split::Split;
 
 #[cfg(feature = "serde")]
@@ -3020,22 +3023,65 @@ impl Rinex {
     }
 }
 
+#[cfg(feature = "qc")]
 impl Merge for Rinex {
-    /// Merges `rhs` into `Self` without mutable access, at the expense of memcopies
-    fn merge(&self, rhs: &Self) -> Result<Self, merge::Error> {
+    /// Merge `rhs` RINEX into Self, using one memcopy.
+    /// When merging two RINEX toghether, the data records
+    /// remain sorted by epoch in chrnonological order.
+    /// The merge operation behavior differs when dealing with
+    /// either a/the header sections, than dealing with the record set.
+    /// When dealing with the header sections, the behavior is to
+    /// preserve existing attributes and only new information contained
+    /// in "rhs" is introduced.  
+    /// When dealing with the record set, "lhs" content is completely
+    /// overwritten, that means:
+    ///   - existing epochs get replaced
+    ///   - new epochs can be introduced
+    /// This currently is the only behavior supported.
+    /// It was mainly developped for two reasons:
+    ///   - allow meaningful and high level operations
+    /// in a data production context
+    ///   - allow complex operations on a data subset,
+    /// where only specific data subset fields are targetted by
+    /// said operation, in preprocessing toolkit.
+    /// ```
+    /// use rinex::prelude::*;
+    /// use rinex::merge::Merge;
+    /// let rnx_a = Rinex::from_file("../test_resources/OBS/V2/delf0010.21o")
+    ///     .unwrap();
+    /// let rnx_b = Rinex::from_file("../test_resources/NAV/V2/amel0010.21g")
+    ///     .unwrap();
+    /// let merged = rnx_a.merge(&rnx_b);
+    /// // When merging, RINEX format must match
+    /// assert_eq!(merged.is_ok(), false);
+    /// let rnx_b = Rinex::from_file("../test_resources/OBS/V3/DUTH0630.22O")
+    ///     .unwrap();
+    /// let merged = rnx_a.merge(&rnx_b);
+    /// assert_eq!(merged.is_ok(), true);
+    /// let merged = merged.unwrap();
+    /// // when merging, Self's attributes are always prefered.
+    /// // Results have most delf0010.21o attributes
+    /// // Only new attributes, that 'DUTH0630.22O' would introduced are stored
+    /// assert_eq!(merged.header.version.major, 2);
+    /// assert_eq!(merged.header.version.minor, 11);
+    /// assert_eq!(merged.header.program, "teqc  2019Feb25");
+    /// // Resulting RINEX will therefore follow RINEX2 specifications
+    /// assert!(merged.to_file("merge.rnx").is_ok(), "failed to merge file");
+    /// ```
+    fn merge(&self, rhs: &Self) -> Result<Self, MergeError> {
         let mut lhs = self.clone();
         lhs.merge_mut(rhs)?;
         Ok(lhs)
     }
-    /// Merges `rhs` into `Self` in place
-    fn merge_mut(&mut self, rhs: &Self) -> Result<(), merge::Error> {
+    /// Merge `rhs` RINEX into `Self` with mutable access.
+    fn merge_mut(&mut self, rhs: &Self) -> Result<(), MergeError> {
         self.header.merge_mut(&rhs.header)?;
         if !self.is_antex() {
             if self.epoch().count() == 0 {
                 // lhs is empty : overwrite
                 self.record = rhs.record.clone();
             } else if rhs.epoch().count() != 0 {
-                // real merge
+                // effective merge
                 self.record.merge_mut(&rhs.record)?;
             }
         } else {

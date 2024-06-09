@@ -1,10 +1,13 @@
-use crate::{merge, merge::Merge, prelude::*, split, split::Split};
+use crate::{prelude::*, split, split::Split};
 
 use crate::epoch;
 use hifitime::Duration;
 use std::collections::{BTreeMap, HashMap};
 use std::str::FromStr;
 use thiserror::Error;
+
+#[cfg(feature = "qc")]
+use qc_traits::context::{Merge, MergeError};
 
 pub(crate) fn is_new_tec_plane(line: &str) -> bool {
     line.contains("START OF TEC MAP")
@@ -75,6 +78,7 @@ pub enum Error {
 /*
  * Merges `rhs` into `lhs`
  */
+#[cfg(feature = "qc")]
 fn merge_plane_mut(lhs: &mut TECPlane, rhs: &TECPlane) {
     for (coord, tec) in rhs {
         if lhs.get(coord).is_none() {
@@ -240,15 +244,14 @@ pub(crate) fn parse_plane(
     Ok((epoch, altitude, plane))
 }
 
+#[cfg(feature = "qc")]
 impl Merge for Record {
-    /// Merges `rhs` into `Self` without mutable access at the expense of more memcopies
-    fn merge(&self, rhs: &Self) -> Result<Self, merge::Error> {
+    fn merge(&self, rhs: &Self) -> Result<Self, MergeError> {
         let mut lhs = self.clone();
         lhs.merge_mut(rhs)?;
         Ok(lhs)
     }
-    /// Merges `rhs` into `Self`
-    fn merge_mut(&mut self, rhs: &Self) -> Result<(), merge::Error> {
+    fn merge_mut(&mut self, rhs: &Self) -> Result<(), MergeError> {
         for (eh, plane) in rhs {
             if let Some(lhs_plane) = self.get_mut(eh) {
                 for (latlon, plane) in plane {

@@ -1,11 +1,14 @@
 use crate::{
-    epoch, merge, merge::Merge, prelude::*, split, split::Split, types::Type, version, Observable,
+    epoch, prelude::*, split, split::Split, types::Type, version, Observable,
 };
 
 use hifitime::Duration;
 use std::collections::{BTreeMap, HashMap};
 use std::str::FromStr;
 use thiserror::Error;
+
+#[cfg(feature = "qc")]
+use qc_traits::context::{Merge, MergeError};
 
 /*
  * Meteo RINEX specific record type.
@@ -136,13 +139,14 @@ pub(crate) fn fmt_epoch(
     Ok(lines)
 }
 
+#[cfg(feature = "qc")]
 impl Merge for Record {
-    fn merge(&self, rhs: &Self) -> Result<Self, merge::Error> {
+    fn merge(&self, rhs: &Self) -> Result<Self, MergeError> {
         let mut lhs = self.clone();
         lhs.merge_mut(rhs)?;
         Ok(lhs)
     }
-    fn merge_mut(&mut self, rhs: &Self) -> Result<(), merge::Error> {
+    fn merge_mut(&mut self, rhs: &Self) -> Result<(), MergeError> {
         for (epoch, observations) in rhs.iter() {
             if let Some(oobservations) = self.get_mut(epoch) {
                 for (observation, data) in observations.iter() {

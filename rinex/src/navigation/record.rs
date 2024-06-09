@@ -34,7 +34,7 @@ fn double_exponent_digits(content: &str) -> String {
 }
 
 use crate::{
-    epoch, merge, merge::Merge, prelude::*, split, split::Split, types::Type, version::Version,
+    epoch, prelude::*, split, split::Split, types::Type, version::Version,
 };
 
 use super::{
@@ -43,6 +43,9 @@ use super::{
 };
 
 use hifitime::Duration;
+
+#[cfg(feature = "qc")]
+use qc_traits::context::{Merge, MergeError};
 
 /// Navigation Message Types.
 /// Refer to [Bibliography::RINEX4] definitions.
@@ -538,15 +541,14 @@ fn fmt_epoch_v4(epoch: &Epoch, data: &Vec<NavFrame>, header: &Header) -> Result<
     Ok(lines)
 }
 
+#[cfg(feature = "qc")]
 impl Merge for Record {
-    /// Merges `rhs` into `Self` without mutable access at the expense of more memcopies
-    fn merge(&self, rhs: &Self) -> Result<Self, merge::Error> {
+    fn merge(&self, rhs: &Self) -> Result<Self, MergeError> {
         let mut lhs = self.clone();
         lhs.merge_mut(rhs)?;
         Ok(lhs)
     }
-    /// Merges `rhs` into `Self`
-    fn merge_mut(&mut self, rhs: &Self) -> Result<(), merge::Error> {
+    fn merge_mut(&mut self, rhs: &Self) -> Result<(), MergeError> {
         for (rhs_epoch, rhs_frames) in rhs {
             if let Some(frames) = self.get_mut(rhs_epoch) {
                 // this epoch already exists

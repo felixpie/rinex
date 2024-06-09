@@ -5,12 +5,14 @@ use thiserror::Error;
 #[cfg(feature = "serde")]
 use serde::Serialize;
 
+#[cfg(feature = "qc")]
+use qc_traits::context::{Merge, MergeError};
+
 use super::{
     antex, clock,
     clock::{ClockKey, ClockProfile},
     hatanaka::{Compressor, Decompressor},
-    header, ionex, is_rinex_comment, merge,
-    merge::Merge,
+    header, ionex, is_rinex_comment, 
     meteo, navigation, observation,
     reader::BufferedReader,
     split,
@@ -637,15 +639,14 @@ pub fn parse_record(
     Ok((record, comments))
 }
 
+#[cfg(feature = "qc")]
 impl Merge for Record {
-    /// Merges `rhs` into `Self` without mutable access at the expense of more memcopies
-    fn merge(&self, rhs: &Self) -> Result<Self, merge::Error> {
+    fn merge(&self, rhs: &Self) -> Result<Self, MergeError> {
         let mut lhs = self.clone();
         lhs.merge_mut(rhs)?;
         Ok(lhs)
     }
-    /// Merges `rhs` into `Self`
-    fn merge_mut(&mut self, rhs: &Self) -> Result<(), merge::Error> {
+    fn merge_mut(&mut self, rhs: &Self) -> Result<(), MergeError> {
         if let Some(lhs) = self.as_mut_nav() {
             if let Some(rhs) = rhs.as_nav() {
                 lhs.merge_mut(rhs)?;

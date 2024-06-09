@@ -4,10 +4,13 @@ use thiserror::Error;
 use std::collections::BTreeMap;
 use strum_macros::EnumString;
 
-use crate::{epoch, merge, merge::Merge, prelude::*, split, split::Split, version::Version};
+use crate::{epoch, prelude::*, split, split::Split, version::Version};
 
 use gnss::prelude::SV;
 use hifitime::Duration;
+
+#[cfg(feature = "qc")]
+use qc_traits::context::{Merge, MergeError, util::merge_mut_option};
 
 /// [`ClockKey`] describes each [`ClockProfile`] at a specific [Epoch].
 #[derive(Error, PartialEq, Eq, Hash, Clone, Debug, PartialOrd, Ord)]
@@ -310,17 +313,14 @@ pub(crate) fn fmt_epoch(epoch: &Epoch, key: &ClockKey, prof: &ClockProfile) -> S
     lines
 }
 
-use crate::merge::merge_mut_option;
-
+#[cfg(feature = "qc")]
 impl Merge for Record {
-    /// Merges `rhs` into `Self` without mutable access at the expense of more memcopies
-    fn merge(&self, rhs: &Self) -> Result<Self, merge::Error> {
+    fn merge(&self, rhs: &Self) -> Result<Self, MergeError> {
         let mut lhs = self.clone();
         lhs.merge_mut(rhs)?;
         Ok(lhs)
     }
-    /// Merges `rhs` into `Self`
-    fn merge_mut(&mut self, rhs: &Self) -> Result<(), merge::Error> {
+    fn merge_mut(&mut self, rhs: &Self) -> Result<(), MergeError> {
         for (rhs_epoch, rhs_content) in rhs.iter() {
             if let Some(lhs_content) = self.get_mut(rhs_epoch) {
                 for (rhs_key, rhs_prof) in rhs_content.iter() {

@@ -234,8 +234,10 @@ impl std::str::FromStr for ProductionAttributes {
     }
 }
 
-use crate::merge::{merge_mut_option, Error as MergeError, Merge};
+#[cfg(feature = "qc")]
+use qc_traits::context::{Merge, MergeError, util::merge_mut_option};
 
+#[cfg(feature = "qc")]
 impl Merge for ProductionAttributes {
     fn merge(&self, rhs: &Self) -> Result<Self, MergeError> {
         let mut lhs = self.clone();
