@@ -38,6 +38,11 @@ pub trait Preprocessing: Masking + Decimate {
 pub enum Repair {
     /// Repairs all zero values by simply removing them from record.
     Zero,
+    /// Apply static offset so Phase data records so they start with null origin (y(t=0)=0).
+    NullPhaseOrigin,
+    /// Convert Phase data symbols to cycles of signals propagation (not meters).
+    /// Only applies to phase data points
+    CarrierPhaseCycles,
 }
 
 pub trait RepairTrait {

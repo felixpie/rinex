@@ -554,7 +554,8 @@ pub fn parse_record(
             }
         },
         Type::ObservationData => {
-            if let Ok(key, data) = observation::record::parse_epoch(header, &epoch_content, obs_ts)
+            if let Ok((key, data)) =
+                observation::record::parse_epoch(header, &epoch_content, obs_ts)
             {
                 obs_rec.insert(key, data);
                 comment_ts = key.epoch; // for comments classification + management

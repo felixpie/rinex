@@ -13,7 +13,7 @@ pub use snr::SNR;
 #[cfg(docsrs)]
 use crate::Bibliography;
 
-pub use record::{LliFlags, ObservationData, Record};
+pub use record::{LliFlags, ObsKey, Observation, Record};
 
 #[cfg(feature = "processing")]
 use crate::prelude::TimeScale;

@@ -971,99 +971,6 @@ impl Rinex {
         }
         false
     }
-
-    /// Removes all observations where receiver phase lock was lost.   
-    /// This is only relevant on OBS RINEX.
-    pub fn lock_loss_filter_mut(&mut self) {
-        self.lli_and_mask_mut(observation::LliFlags::LOCK_LOSS)
-    }
-
-    /// Applies given AND mask in place, to all observations.
-    /// This has no effect on non observation records.
-    /// This also drops observations that did not come with an LLI flag.  
-    /// Only relevant on OBS RINEX.
-    pub fn lli_and_mask_mut(&mut self, mask: observation::LliFlags) {
-        if !self.is_observation_rinex() {
-            return; // nothing to browse
-        }
-        let record = self.record.as_mut_obs().unwrap();
-        for (_e, (_clk, sv)) in record.iter_mut() {
-            for (_sv, obs) in sv.iter_mut() {
-                obs.retain(|_, data| {
-                    if let Some(lli) = data.lli {
-                        lli.intersects(mask)
-                    } else {
-                        false // drops data with no LLI attached
-                    }
-                })
-            }
-        }
-    }
-
-    /// [`Rinex::lli_and_mask`] immutable implementation.   
-    /// Only relevant on OBS RINEX.
-    pub fn lli_and_mask(&self, mask: observation::LliFlags) -> Self {
-        let mut c = self.clone();
-        c.lli_and_mask_mut(mask);
-        c
-    }
-    /// Aligns Phase observations at origin
-    pub fn observation_phase_align_origin_mut(&mut self) {
-        let mut init_phases: HashMap<SV, HashMap<Observable, f64>> = HashMap::new();
-        if let Some(r) = self.record.as_mut_obs() {
-            for (_, (_, vehicles)) in r.iter_mut() {
-                for (sv, observations) in vehicles.iter_mut() {
-                    for (observable, data) in observations.iter_mut() {
-                        if observable.is_phase_observable() {
-                            if let Some(init_phase) = init_phases.get_mut(sv) {
-                                if init_phase.get(observable).is_none() {
-                                    init_phase.insert(observable.clone(), data.obs);
-                                }
-                            } else {
-                                let mut map: HashMap<Observable, f64> = HashMap::new();
-                                map.insert(observable.clone(), data.obs);
-                                init_phases.insert(*sv, map);
-                            }
-                            data.obs -= init_phases.get(sv).unwrap().get(observable).unwrap();
-                        }
-                    }
-                }
-            }
-        }
-    }
-    /// Aligns Phase observations at origin,
-    /// immutable implementation
-    pub fn observation_phase_align_origin(&self) -> Self {
-        let mut s = self.clone();
-        s.observation_phase_align_origin_mut();
-        s
-    }
-    /// Converts all Phase Data to Carrier Cycles by multiplying all phase points
-    /// by the carrier signal wavelength.
-    pub fn observation_phase_carrier_cycles_mut(&mut self) {
-        if let Some(r) = self.record.as_mut_obs() {
-            for (_, (_, vehicles)) in r.iter_mut() {
-                for (sv, observations) in vehicles.iter_mut() {
-                    for (observable, data) in observations.iter_mut() {
-                        if observable.is_phase_observable() {
-                            if let Ok(carrier) = observable.carrier(sv.constellation) {
-                                data.obs *= carrier.wavelength();
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Converts all Phase Data to Carrier Cycles by multiplying all phase points
-    /// by the carrier signal wavelength.
-    pub fn observation_phase_carrier_cycles(&self) -> Self {
-        let mut s = self.clone();
-        s.observation_phase_carrier_cycles_mut();
-        s
-    }
-
     /// Writes self into given file.   
     /// Both header + record will strictly follow RINEX standards.   
     /// Record: refer to supported RINEX types.
@@ -1683,7 +1590,13 @@ impl Rinex {
 // use std::str::FromStr;
 
 #[cfg(feature = "obs")]
-use crate::observation::{record::code_multipath, LliFlags, SNR};
+use crate::observation::{
+    record::{
+        code_multipath, lli_and_mask_mut as observation_lli_and_mask_mut,
+        phase_lock_loss_mut as observation_phase_lock_loss_mut,
+    },
+    LliFlags as ObservationLliFlags, SNR,
+};
 
 /*
  * OBS RINEX specific methods: only available on crate feature.
@@ -2166,13 +2079,25 @@ impl Rinex {
     }
     /// Returns Code Multipath bias estimates, for sampled code combination and per SV.
     /// Refer to [Bibliography::ESABookVol1] and [Bibliography::MpTaoglas].
-    pub fn code_multipath(
-        &self,
-    ) -> HashMap<Observable, BTreeMap<SV, BTreeMap<(Epoch, EpochFlag), f64>>> {
+    pub fn code_multipath(&self) -> HashMap<ObsKey, Observation> {
         if let Some(r) = self.record.as_obs() {
             code_multipath(r)
         } else {
-            HashMap::new()
+            Default::default()
+        }
+    }
+    /// Applies AND mask with desired [ObservationLliFlags],
+    /// with mutable access.
+    pub fn lli_mask_mut(&mut self, mask: ObservationLliFlags) {
+        if let Some(rec) = self.record.as_mut_obs() {
+            observation_lli_and_mask_mut(rec, mask);
+        }
+    }
+    /// Removes all observations where receiver phase lock
+    /// was declared lost by hardware.
+    pub fn phase_lock_loss_mut(&mut self) {
+        if let Some(rec) = self.record.as_mut_obs() {
+            observation_phase_lock_loss_mut(rec);
         }
     }
 }

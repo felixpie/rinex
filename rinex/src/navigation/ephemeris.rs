@@ -369,14 +369,14 @@ impl Ephemeris {
     pub fn toe(&self, sv_ts: TimeScale) -> Option<Epoch> {
         // TODO: in CNAV V4 TOC is said to be TOE... ...
         let mut week = self.get_week()?;
+        if sv_ts == TimeScale::GST {
+            week -= 1024;
+        }
         let sec = self.get_orbit_f64("toe")?;
         let week_dur = Duration::from_days((week * 7) as f64);
         let sec_dur = Duration::from_seconds(sec);
         match sv_ts {
             TimeScale::GPST | TimeScale::QZSST | TimeScale::GST => {
-                if sv_ts == TimeScale::GST {
-                    week -= 1024;
-                }
                 Some(Epoch::from_duration(week_dur + sec_dur, TimeScale::GPST))
             },
             TimeScale::BDT => Some(Epoch::from_bdt_duration(week_dur + sec_dur)),
@@ -577,7 +577,7 @@ impl Ephemeris {
     /// Total seconds elapsed between `t` and ToE, expressed in appropriate timescale.
     /// NB: this does not apply to GEO Ephemerides but only MEO.
     fn t_k(&self, sv: SV, t: Epoch) -> Option<f64> {
-        let mut sv_ts = sv.timescale()?;
+        let sv_ts = sv.timescale()?;
         let toe = self.toe(sv_ts)?;
         let dt = t.to_time_scale(sv_ts) - toe;
         Some(dt.to_seconds())
@@ -684,8 +684,8 @@ impl Ephemeris {
         let (x, y) = (r_k * u_k.cos(), r_k * u_k.sin());
 
         // rotated position
-        let (sin_omega_k, cos_omega_k) = omega_k.sin_cos();
-        let (sin_i_k, cos_i_k) = i_k.sin_cos();
+        //let (sin_omega_k, cos_omega_k) = omega_k.sin_cos();
+        //let (sin_i_k, cos_i_k) = i_k.sin_cos();
 
         // earth rotation
         let t_sv_gpst = t_sv.to_time_scale(TimeScale::GPST);
