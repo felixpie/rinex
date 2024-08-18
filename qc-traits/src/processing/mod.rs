@@ -36,7 +36,7 @@ pub trait Preprocessing: Masking + Decimate {
 /// Repair
 #[derive(Debug, Copy, Clone)]
 pub enum Repair {
-    /// Repairs all zero values.
+    /// Repairs all zero values by simply removing them from record.
     Zero,
 }
 

@@ -54,7 +54,7 @@ pub enum Error {
 /// GPS、BDS、Galieo
 /// - Helps calculate relativistic effects(todo)
 #[cfg(feature = "nav")]
-#[cfg_attr(docrs, doc(cfg(feature = "nav")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "nav")))]
 #[derive(Debug, Clone, Copy)]
 struct EphemerisHelper {
     /// Satellite
@@ -90,7 +90,7 @@ struct EphemerisHelper {
 }
 
 #[cfg(feature = "nav")]
-#[cfg_attr(docrs, doc(cfg(feature = "nav")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "nav")))]
 impl EphemerisHelper {
     fn meo_orbit_to_ecef_rotation_matrix(&self) -> Rotation<f64, 3> {
         // Positive angles mean counterclockwise rotation
@@ -283,7 +283,7 @@ pub struct Ephemeris {
 #[cfg(feature = "nav")]
 #[derive(Default, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(docrs, doc(cfg(feature = "nav")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "nav")))]
 pub struct Kepler {
     /// semi major axis (m)
     pub a: f64,
@@ -306,7 +306,7 @@ pub struct Kepler {
 /// Orbit Perturbations
 #[cfg(feature = "nav")]
 #[derive(Default, Clone, Debug)]
-#[cfg_attr(docrs, doc(cfg(feature = "nav")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "nav")))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Perturbations {
     /// Mean motion difference from computed value [semicircles.s-1]

@@ -59,9 +59,9 @@ bitflags! {
 
 #[derive(Default, Copy, Clone, Debug, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
-pub struct ObservationData {
-    /// physical measurement
-    pub obs: f64,
+pub struct Observation {
+    /// Actual observation
+    pub value: f64,
     /// Lock loss indicator
     pub lli: Option<LliFlags>,
     /// Signal strength indicator
@@ -132,15 +132,20 @@ impl ObservationData {
     }
 }
 
-/// Observation Record content, sorted by [`Epoch`], per [`SV`] and per
-/// [`Observable`].
-pub type Record = BTreeMap<
-    (Epoch, EpochFlag),
-    (
-        Option<f64>,
-        BTreeMap<SV, HashMap<Observable, ObservationData>>,
-    ),
->;
+/// Observation Record Index,
+/// sorted by [Epoch], [SV], [Carrier] signal
+#[derive(Default, Copy, Clone, Debug, PartialEq, PartialOrd, Ord, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+pub struct ObsKey {
+    pub sv: SV,
+    pub flag: EpochFlag,
+    pub epoch: Epoch,
+    pub carrier: Carrier,
+    pub observable: Observable,
+}
+
+/// Observation Record are [Observation] indexed by [ObsKey]
+pub type Record = BTreeMap<ObsKey, Observation>;
 
 /// Returns true if given content matches a new OBSERVATION data epoch
 pub(crate) fn is_new_epoch(line: &str, v: Version) -> bool {
@@ -183,14 +188,7 @@ pub(crate) fn parse_epoch(
     header: &Header,
     content: &str,
     ts: TimeScale,
-) -> Result<
-    (
-        (Epoch, EpochFlag),
-        Option<f64>,
-        BTreeMap<SV, HashMap<Observable, ObservationData>>,
-    ),
-    Error,
-> {
+) -> Result<(ObsKey, Observation), Error> {
     let mut lines = content.lines();
     let mut line = match lines.next() {
         Some(l) => l,
@@ -278,14 +276,7 @@ fn parse_normal(
     clock_offset: Option<f64>,
     rem: &str,
     mut lines: std::str::Lines<'_>,
-) -> Result<
-    (
-        (Epoch, EpochFlag),
-        Option<f64>,
-        BTreeMap<SV, HashMap<Observable, ObservationData>>,
-    ),
-    Error,
-> {
+) -> Result<(ObsKey, Observation), Error> {
     // previously identified observables (that we expect)
     let obs = header.obs.as_ref().unwrap();
     let observables = &obs.codes;
@@ -321,14 +312,7 @@ fn parse_event(
     _clock_offset: Option<f64>,
     _rem: &str,
     _lines: std::str::Lines<'_>,
-) -> Result<
-    (
-        (Epoch, EpochFlag),
-        Option<f64>,
-        BTreeMap<SV, HashMap<Observable, ObservationData>>,
-    ),
-    Error,
-> {
+) -> Result<(ObsKey, Observation), Error> {
     // TODO: Verify that the number of lines of data
     // to read matches the number of records expected
 
@@ -346,7 +330,7 @@ fn parse_v2(
     systems: &str,
     header_observables: &HashMap<Constellation, Vec<Observable>>,
     lines: std::str::Lines<'_>,
-) -> BTreeMap<SV, HashMap<Observable, ObservationData>> {
+) -> (ObsKey, Observation) {
     let svnn_size = 3; // SVNN standard
     let nb_max_observables = 5; // in a single line
     let observable_width = 16; // data + 2 flags + 1 whitespace
@@ -549,7 +533,7 @@ fn parse_v2(
 fn parse_v3(
     observables: &HashMap<Constellation, Vec<Observable>>,
     lines: std::str::Lines<'_>,
-) -> BTreeMap<SV, HashMap<Observable, ObservationData>> {
+) -> (ObsKey, Observation) {
     let svnn_size = 3; // SVNN standard
     let observable_width = 16; // data + 2 flags
     let mut data: BTreeMap<SV, HashMap<Observable, ObservationData>> = BTreeMap::new();
@@ -857,19 +841,7 @@ impl Split for Record {
 
 #[cfg(feature = "processing")]
 pub(crate) fn repair_zero_mut(rec: &mut Record) {
-    rec.retain(|_, (_, svnn)| {
-        svnn.retain(|_, obs| {
-            obs.retain(|ob, value| {
-                if ob.is_pseudorange_observable() || ob.is_phase_observable() {
-                    value.obs > 0.0
-                } else {
-                    true
-                }
-            });
-            !obs.is_empty()
-        });
-        !svnn.is_empty()
-    });
+    rec.retain(|_, meas| meas.value != 0.0);
 }
 
 #[cfg(feature = "processing")]

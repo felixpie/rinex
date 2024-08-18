@@ -166,7 +166,7 @@ impl Record {
                 let record = self.as_obs().unwrap();
                 let obs_fields = &header.obs.as_ref().unwrap();
                 let mut compressor = Compressor::default();
-                for ((epoch, flag), (clock_offset, data)) in record.iter() {
+                for (key, data) in record.iter() {
                     let epoch =
                         observation::record::fmt_epoch(*epoch, *flag, clock_offset, data, header);
                     if obs_fields.crinex.is_some() {
@@ -452,11 +452,11 @@ pub fn parse_record(
                         }
                     },
                     Type::ObservationData => {
-                        if let Ok((e, ck_offset, map)) =
+                        if let Ok((key, data)) =
                             observation::record::parse_epoch(header, &epoch_content, obs_ts)
                         {
-                            obs_rec.insert(e, (ck_offset, map));
-                            comment_ts = e.0; // for comments classification & management
+                            obs_rec.insert(key, data);
+                            comment_ts = key.epoch; // for comments classification & management
                         }
                     },
                     Type::DORIS => {
@@ -554,11 +554,10 @@ pub fn parse_record(
             }
         },
         Type::ObservationData => {
-            if let Ok((e, ck_offset, map)) =
-                observation::record::parse_epoch(header, &epoch_content, obs_ts)
+            if let Ok(key, data) = observation::record::parse_epoch(header, &epoch_content, obs_ts)
             {
-                obs_rec.insert(e, (ck_offset, map));
-                comment_ts = e.0; // for comments classification + management
+                obs_rec.insert(key, data);
+                comment_ts = key.epoch; // for comments classification + management
             }
         },
         Type::DORIS => {

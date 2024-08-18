@@ -1,6 +1,6 @@
 #![doc(html_logo_url = "https://raw.githubusercontent.com/georust/meta/master/logo/logo.png")]
 #![doc = include_str!("../README.md")]
-#![cfg_attr(docrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![allow(clippy::type_complexity)]
 
 extern crate gnss_rs as gnss;
@@ -145,7 +145,7 @@ pub use split::Split;
 #[macro_use]
 extern crate serde;
 
-#[cfg(docrs)]
+#[cfg(docsrs)]
 pub use bibliography::Bibliography;
 
 /*
@@ -901,9 +901,11 @@ impl Rinex {
 
     /// Generates a new RINEX = Self(=RINEX(A)) - RHS(=RINEX(B)).
     /// Therefore RHS is considered reference.
-    /// This operation is typically used to compare two GNSS receivers.
+    /// This operation is typically used to compare two GNSS receivers
+    /// by substracting two Observation RINEX generated on both ends,
+    /// especially when considering the signal phase.
     /// Both RINEX formats must match otherwise this will panic.
-    /// This is only available to Observation RINEX files.
+    /// This is currently only applies to Observation RINEX files and will panic otherwise.
     pub fn substract(&self, rhs: &Self) -> Self {
         let mut record = observation::Record::default();
         let lhs_rec = self
@@ -916,66 +918,18 @@ impl Rinex {
             .as_obs()
             .expect("can only substract observation data");
 
-        for ((epoch, flag), (clk, svnn)) in lhs_rec {
-            if let Some((ref_clk, ref_svnn)) = rhs_rec.get(&(*epoch, *flag)) {
-                for (sv, observables) in svnn {
-                    if let Some(ref_observables) = ref_svnn.get(sv) {
-                        for (observable, observation) in observables {
-                            if let Some(ref_observation) = ref_observables.get(observable) {
-                                if let Some((_, c_svnn)) = record.get_mut(&(*epoch, *flag)) {
-                                    if let Some(c_observables) = c_svnn.get_mut(sv) {
-                                        c_observables.insert(
-                                            observable.clone(),
-                                            ObservationData {
-                                                obs: observation.obs - ref_observation.obs,
-                                                lli: None,
-                                                snr: None,
-                                            },
-                                        );
-                                    } else {
-                                        // new observable
-                                        let mut inner =
-                                            HashMap::<Observable, ObservationData>::new();
-                                        let observation = ObservationData {
-                                            obs: observation.obs - ref_observation.obs,
-                                            lli: None,
-                                            snr: None,
-                                        };
-                                        inner.insert(observable.clone(), observation);
-                                        c_svnn.insert(*sv, inner);
-                                    }
-                                } else {
-                                    // new epoch
-                                    let mut map = HashMap::<Observable, ObservationData>::new();
-                                    let observation = ObservationData {
-                                        obs: observation.obs - ref_observation.obs,
-                                        lli: None,
-                                        snr: None,
-                                    };
-                                    map.insert(observable.clone(), observation);
-                                    let mut inner =
-                                        BTreeMap::<SV, HashMap<Observable, ObservationData>>::new();
-                                    inner.insert(*sv, map);
-                                    if let Some(clk) = clk {
-                                        if let Some(refclk) = ref_clk {
-                                            record.insert(
-                                                (*epoch, *flag),
-                                                (Some(clk - refclk), inner),
-                                            );
-                                        } else {
-                                            record.insert((*epoch, *flag), (None, inner));
-                                        }
-                                    } else {
-                                        record.insert((*epoch, *flag), (None, inner));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+        for (key, observation) in lhs_rec.iter() {
+            if let Some(rhs_observation) = rhs_rec.get(&key) {
+                record.insert(
+                    *key,
+                    Observation {
+                        value: observation.value - rhs_observation.value,
+                        lli: None, // TODO
+                        snr: None, // TODO
+                    },
+                );
             }
         }
-
         Rinex::new(self.header.clone(), record::Record::ObsRecord(record))
     }
 
@@ -1310,7 +1264,7 @@ impl Rinex {
 impl Rinex {
     pub fn epoch(&self) -> Box<dyn Iterator<Item = Epoch> + '_> {
         if let Some(r) = self.record.as_obs() {
-            Box::new(r.iter().map(|((k, _), _)| *k))
+            Box::new(r.iter().map(|(k, _)| k.epoch).unique())
         } else if let Some(r) = self.record.as_doris() {
             Box::new(r.iter().map(|((k, _), _)| *k))
         } else if let Some(r) = self.record.as_nav() {
@@ -1360,22 +1314,7 @@ impl Rinex {
             Box::new(
                 // grab all vehicles identified through all Epochs
                 // and fold them into a unique list
-                record
-                    .iter()
-                    .map(|((_, _), (_clk, entries))| {
-                        let sv: Vec<SV> = entries.keys().cloned().collect();
-                        sv
-                    })
-                    .fold(vec![], |mut list, new_items| {
-                        for new in new_items {
-                            if !list.contains(&new) {
-                                // create a unique list
-                                list.push(new);
-                            }
-                        }
-                        list
-                    })
-                    .into_iter(),
+                record.iter().map(|(key, _)| key.sv),
             )
         } else if let Some(record) = self.record.as_nav() {
             Box::new(
@@ -1456,9 +1395,9 @@ impl Rinex {
             Box::new(
                 // grab all vehicles identified through all Epochs
                 // and fold them into individual lists
-                record.iter().map(|((epoch, _), (_clk, entries))| {
-                    (*epoch, entries.keys().unique().cloned().collect())
-                }),
+                record
+                    .iter()
+                    .map(|(key, _)| (*epoch, entries.keys().unique().cloned().collect())),
             )
         } else if let Some(record) = self.record.as_nav() {
             Box::new(
@@ -1751,7 +1690,7 @@ use crate::observation::{record::code_multipath, LliFlags, SNR};
  * Either specific Iterators, or meaningful data we can extract.
  */
 #[cfg(feature = "obs")]
-#[cfg_attr(docrs, doc(cfg(feature = "obs")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "obs")))]
 impl Rinex {
     /// Returns a Unique Iterator over identified [`Carrier`]s
     pub fn carrier(&self) -> Box<dyn Iterator<Item = Carrier> + '_> {
@@ -2248,7 +2187,7 @@ use crate::navigation::{
  * Either specific Iterators, or meaningful data we can extract.
  */
 #[cfg(feature = "nav")]
-#[cfg_attr(docrs, doc(cfg(feature = "nav")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "nav")))]
 impl Rinex {
     /// Returns a Unique Iterator over [`NavMsgType`]s that were identified
     /// ```
@@ -2349,7 +2288,7 @@ impl Rinex {
         if sv.constellation.is_sbas() {
             let (toc, (_, _, eph)) = self
                 .ephemeris()
-                .filter(|(t_i, (_, sv_i, eph_i))| sv == *sv_i)
+                .filter(|(_, (_, sv_i, _))| sv == *sv_i)
                 .reduce(|k, _| k)?;
             Some((*toc, *toc, eph))
         } else {
@@ -2629,7 +2568,7 @@ impl Rinex {
  * Either specific Iterators, or meaningful data we can extract.
  */
 #[cfg(feature = "meteo")]
-#[cfg_attr(docrs, doc(cfg(feature = "meteo")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "meteo")))]
 impl Rinex {
     /// Returns temperature data iterator, values expressed in Celcius degrees
     /// ```
@@ -2952,11 +2891,11 @@ impl Split for Rinex {
 }
 
 #[cfg(feature = "processing")]
-#[cfg_attr(docrs, doc(cfg(feature = "processing")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "processing")))]
 impl Preprocessing for Rinex {}
 
 #[cfg(feature = "processing")]
-#[cfg_attr(docrs, doc(cfg(feature = "processing")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "processing")))]
 impl RepairTrait for Rinex {
     fn repair(&self, r: Repair) -> Self {
         let mut s = self.clone();
@@ -2971,7 +2910,7 @@ impl RepairTrait for Rinex {
 }
 
 #[cfg(feature = "processing")]
-#[cfg_attr(docrs, doc(cfg(feature = "processing")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "processing")))]
 impl Masking for Rinex {
     fn mask(&self, f: &MaskFilter) -> Self {
         let mut s = self.clone();
@@ -2997,7 +2936,7 @@ impl Masking for Rinex {
 }
 
 #[cfg(feature = "processing")]
-#[cfg_attr(docrs, doc(cfg(feature = "processing")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "processing")))]
 impl Decimate for Rinex {
     fn decimate(&self, f: &DecimationFilter) -> Self {
         let mut s = self.clone();
@@ -3024,7 +2963,7 @@ impl Decimate for Rinex {
 use observation::Dcb;
 
 #[cfg(feature = "obs")]
-#[cfg_attr(docrs, doc(cfg(feature = "obs")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "obs")))]
 impl Dcb for Rinex {
     fn dcb(&self) -> HashMap<String, BTreeMap<SV, BTreeMap<(Epoch, EpochFlag), f64>>> {
         if let Some(r) = self.record.as_obs() {
@@ -3039,7 +2978,7 @@ impl Dcb for Rinex {
 use observation::{Combination, Combine};
 
 #[cfg(feature = "obs")]
-#[cfg_attr(docrs, doc(cfg(feature = "obs")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "obs")))]
 impl Combine for Rinex {
     fn combine(
         &self,
@@ -3060,7 +2999,7 @@ use crate::clock::{ClockKey, ClockProfile, ClockProfileType};
  * Clock RINEX specific feature
  */
 #[cfg(feature = "clock")]
-#[cfg_attr(docrs, doc(cfg(feature = "clock")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "clock")))]
 impl Rinex {
     /// Returns Iterator over Clock RINEX content.
     pub fn precise_clock(
@@ -3108,7 +3047,7 @@ impl Rinex {
  * IONEX specific feature
  */
 #[cfg(feature = "ionex")]
-#[cfg_attr(docrs, doc(cfg(feature = "ionex")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "ionex")))]
 impl Rinex {
     /// Iterates over IONEX maps, per Epoch and altitude.
     /// ```
@@ -3234,7 +3173,7 @@ impl Rinex {
  * ANTEX specific feature
  */
 #[cfg(feature = "antex")]
-#[cfg_attr(docrs, doc(cfg(feature = "antex")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "antex")))]
 impl Rinex {
     /// Iterates over antenna specifications that are still valid
     pub fn antex_valid_calibrations(
@@ -3315,7 +3254,7 @@ impl Rinex {
  * DORIS special features
  */
 #[cfg(feature = "doris")]
-#[cfg_attr(docrs, doc(cfg(feature = "doris")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "doris")))]
 impl Rinex {
     /// Returns Stations Iterator
     pub fn stations(&self) -> Box<dyn Iterator<Item = &Station> + '_> {
