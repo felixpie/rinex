@@ -70,7 +70,7 @@ use epoch::epoch_decompose;
 use ionex::TECPlane;
 use navigation::NavFrame;
 use observable::Observable;
-use observation::{Crinex, ObservationData};
+use observation::{Crinex, Observation};
 use version::Version;
 
 use production::{DataSource, DetailedProductionAttributes, ProductionAttributes, FFU, PPU};

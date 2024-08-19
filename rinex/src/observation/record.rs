@@ -4,12 +4,18 @@ use std::str::FromStr;
 use thiserror::Error;
 
 use crate::{
-    epoch, merge, merge::Merge, prelude::Duration, prelude::*, split, split::Split, types::Type,
-    version::Version, Carrier, Observable,
+    epoch::{
+        format as format_epoch, parse_utc as parse_utc_epoch, ParsingError as EpochParsingError,
+    },
+    merge::{Error as MergeError, Merge},
+    observation::{flag::Error as FlagError, EpochFlag, HeaderFields, SNR},
+    prelude::Duration,
+    prelude::*,
+    split::{Error as SplitError, Split},
+    types::Type,
+    version::Version,
+    Carrier, Observable,
 };
-
-use crate::observation::EpochFlag;
-use crate::observation::SNR;
 
 #[cfg(feature = "processing")]
 use qc_traits::processing::{
@@ -19,9 +25,9 @@ use qc_traits::processing::{
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("failed to parse epoch flag")]
-    EpochFlag(#[from] crate::observation::flag::Error),
+    EpochFlag(#[from] FlagError),
     #[error("failed to parse epoch")]
-    EpochError(#[from] epoch::ParsingError),
+    EpochError(#[from] EpochParsingError),
     #[error("constellation parsing error")]
     ConstellationParsing(#[from] gnss::constellation::ParsingError),
     #[error("sv parsing error")]
@@ -68,10 +74,10 @@ pub struct Observation {
     pub snr: Option<SNR>,
 }
 
-impl ObservationData {
-    /// Builds new ObservationData structure
-    pub fn new(obs: f64, lli: Option<LliFlags>, snr: Option<SNR>) -> ObservationData {
-        ObservationData { obs, lli, snr }
+impl Observation {
+    /// Builds new Observation structure
+    pub fn new(obs: f64, lli: Option<LliFlags>, snr: Option<SNR>) -> Observation {
+        Observation { obs, lli, snr }
     }
     /// Returns `true` if self is determined as `ok`.    
     /// Self is declared `ok` if LLI and SSI flags missing.
@@ -117,7 +123,7 @@ impl ObservationData {
 
 /// Observation Record Index,
 /// sorted by [Epoch], [SV], [Carrier] signal
-#[derive(Default, Copy, Clone, Debug, PartialEq, PartialOrd, Ord, Eq, Hash)]
+#[derive(Default, Clone, Debug, PartialEq, PartialOrd, Ord, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct ObsKey {
     pub sv: SV,
@@ -137,7 +143,7 @@ pub(crate) fn is_new_epoch(line: &str, v: Version) -> bool {
         } else {
             // SPLICE flag handling (still an Observation::flag)
             let significant = !line[0..26].trim().is_empty();
-            let epoch = epoch::parse_utc(&line[0..26]);
+            let epoch = parse_utc_epoch(&line[0..26]);
             let flag = EpochFlag::from_str(line[26..29].trim());
             if significant {
                 epoch.is_ok() && flag.is_ok()
@@ -165,7 +171,7 @@ pub(crate) fn is_new_epoch(line: &str, v: Version) -> bool {
     }
 }
 
-/// Builds `Record` entry for `ObservationData` from given epoch content
+/// Builds `Record` entry for `Observation` from given epoch content
 pub(crate) fn parse_epoch(
     header: &Header,
     content: &str,
@@ -258,12 +264,11 @@ fn parse_normal(
     clock_offset: Option<f64>,
     rem: &str,
     mut lines: std::str::Lines<'_>,
-) -> Result<(ObsKey, Observation), Error> {
+) -> Result<Vec<(ObsKey, Observation)>, Error> {
     // previously identified observables (that we expect)
     let obs = header.obs.as_ref().unwrap();
     let observables = &obs.codes;
-
-    let data = match header.version.major {
+    match header.version.major {
         2 => {
             // grab system descriptions
             //  current line remainder
@@ -282,8 +287,7 @@ fn parse_normal(
             parse_v2(header, &systems, observables, lines)
         },
         _ => parse_v3(observables, lines),
-    };
-    Ok(((epoch, flag), clock_offset, data))
+    }
 }
 
 fn parse_event(
@@ -312,14 +316,12 @@ fn parse_v2(
     systems: &str,
     header_observables: &HashMap<Constellation, Vec<Observable>>,
     lines: std::str::Lines<'_>,
-) -> (ObsKey, Observation) {
+) -> Vec<(ObsKey, Observation)> {
     let svnn_size = 3; // SVNN standard
     let nb_max_observables = 5; // in a single line
     let observable_width = 16; // data + 2 flags + 1 whitespace
     let mut sv_ptr = 0; // svnn pointer
     let mut obs_ptr = 0; // observable pointer
-    let mut data: BTreeMap<SV, HashMap<Observable, ObservationData>> = BTreeMap::new();
-    let mut inner: HashMap<Observable, ObservationData> = HashMap::with_capacity(5);
     let mut sv = SV::default();
     let mut observables: &Vec<Observable>;
     //println!("{:?}", header_observables); // DEBUG
@@ -437,7 +439,7 @@ fn parse_v2(
                     //println!("{} {:?} {:?} ==> {}", obs, lli, snr, obscodes[obs_ptr-1]); //DEBUG
                     inner.insert(
                         observables[obs_ptr - 1].clone(),
-                        ObservationData { obs, lli, snr },
+                        Observation { obs, lli, snr },
                     );
                 } //f64::obs
             } // parsing all observations
@@ -515,27 +517,30 @@ fn parse_v2(
 fn parse_v3(
     observables: &HashMap<Constellation, Vec<Observable>>,
     lines: std::str::Lines<'_>,
-) -> (ObsKey, Observation) {
+) -> Vec<(ObsKey, Observation)> {
     let svnn_size = 3; // SVNN standard
     let observable_width = 16; // data + 2 flags
-    let mut data: BTreeMap<SV, HashMap<Observable, ObservationData>> = BTreeMap::new();
-    let mut inner: HashMap<Observable, ObservationData> = HashMap::with_capacity(5);
+
+    let mut sv = SV::default();
+    let mut obs = Observable::default();
+    let mut ret = Vec::<(ObsKey, Observation)>::new();
+
     for line in lines {
         // browse all lines
         //println!("parse_v3: \"{}\"", line); //DEBUG
         let (sv, line) = line.split_at(svnn_size);
         if let Ok(sv) = SV::from_str(sv) {
-            let obscodes = match sv.constellation.is_sbas() {
+            let observables = match sv.constellation.is_sbas() {
                 true => observables.get(&Constellation::SBAS),
                 false => observables.get(&sv.constellation),
             };
-            //println!("SV: {} OBSERVABLES: {:?}", sv, obscodes); // DEBUG
-            if let Some(obscodes) = obscodes {
+            //println!("SV: {} OBSERVABLES: {:?}", sv, observables); // DEBUG
+            if let Some(observables) = observables {
                 let nb_obs = line.len() / observable_width;
                 inner.clear();
                 let mut rem = line;
                 for i in 0..nb_obs {
-                    if i == obscodes.len() {
+                    if i == observables.len() {
                         break; // line abnormally long
                                // does not match previous Header definitions
                                // => would not be able to sort data
@@ -549,7 +554,7 @@ fn parse_v3(
                     let mut lli: Option<LliFlags> = None;
                     let obs = &content[0..std::cmp::min(observable_width - 2, content_len)];
                     //println!("OBS \"{}\"", obs); //DEBUG
-                    if let Ok(obs) = f64::from_str(obs.trim()) {
+                    if let Ok(value) = obs.trim().parse::<f64>() {
                         if content_len > observable_width - 2 {
                             let lli_str = &content[observable_width - 2..observable_width - 1];
                             if let Ok(u) = u8::from_str_radix(lli_str, 10) {
@@ -565,7 +570,14 @@ fn parse_v3(
                         //println!("LLI {:?}", lli); //DEBUG
                         //println!("SSI {:?}", snr);
                         // build content
-                        inner.insert(obscodes[i].clone(), ObservationData { obs, lli, snr });
+                        let key = ObsKey {
+                            sv,
+                            epoch,
+                            flag,
+                            observable,
+                        };
+                        let value = Observation { value, snr, lli };
+                        ret.push((key, value));
                     }
                 }
                 if rem.len() >= observable_width - 2 {
@@ -585,16 +597,20 @@ fn parse_v3(
                                 }
                             }
                         }
-                        inner.insert(obscodes[nb_obs].clone(), ObservationData { obs, lli, snr });
+                        let key = ObsKey {
+                            sv,
+                            epoch,
+                            flag,
+                            observable: observables[nb_obs].clone(),
+                        };
+                        let value = Observation { value, lli, snr };
+                        ret.push((key, value));
                     }
                 }
-                if !inner.is_empty() {
-                    data.insert(sv, inner.clone());
-                }
-            } //got some observables to work with
-        } // SV::from_str failed()
-    } //browse all lines
-    data
+            } //observables
+        } // SV::from_str
+    } //lines
+    ret
 }
 
 /// Formats one epoch according to standard definitions
@@ -602,7 +618,7 @@ pub(crate) fn fmt_epoch(
     epoch: Epoch,
     flag: EpochFlag,
     clock_offset: &Option<f64>,
-    data: &BTreeMap<SV, HashMap<Observable, ObservationData>>,
+    data: &BTreeMap<SV, HashMap<Observable, Observation>>,
     header: &Header,
 ) -> String {
     if header.version.major < 3 {
@@ -616,7 +632,7 @@ fn fmt_epoch_v3(
     epoch: Epoch,
     flag: EpochFlag,
     clock_offset: &Option<f64>,
-    data: &BTreeMap<SV, HashMap<Observable, ObservationData>>,
+    data: &BTreeMap<SV, HashMap<Observable, Observation>>,
     header: &Header,
 ) -> String {
     let mut lines = String::with_capacity(128);
@@ -624,7 +640,7 @@ fn fmt_epoch_v3(
 
     lines.push_str(&format!(
         "> {}  {} {:2}",
-        epoch::format(epoch, Type::ObservationData, 3),
+        format_epoch(epoch, Type::Observation, 3),
         flag,
         data.len()
     ));
@@ -669,7 +685,7 @@ fn fmt_epoch_v2(
     epoch: Epoch,
     flag: EpochFlag,
     clock_offset: &Option<f64>,
-    data: &BTreeMap<SV, HashMap<Observable, ObservationData>>,
+    data: &BTreeMap<SV, HashMap<Observable, Observation>>,
     header: &Header,
 ) -> String {
     let mut lines = String::with_capacity(128);
@@ -677,7 +693,7 @@ fn fmt_epoch_v2(
 
     lines.push_str(&format!(
         " {}  {} {:2}",
-        epoch::format(epoch, Type::ObservationData, 2),
+        format_epoch(epoch, Type::Observation, 2),
         flag,
         data.len()
     ));
@@ -738,13 +754,13 @@ fn fmt_epoch_v2(
 
 impl Merge for Record {
     /// Merge `rhs` into `Self`
-    fn merge(&self, rhs: &Self) -> Result<Self, merge::Error> {
+    fn merge(&self, rhs: &Self) -> Result<Self, MergeError> {
         let mut lhs = self.clone();
         lhs.merge_mut(rhs)?;
         Ok(lhs)
     }
     /// Merge `rhs` into `Self`
-    fn merge_mut(&mut self, rhs: &Self) -> Result<(), merge::Error> {
+    fn merge_mut(&mut self, rhs: &Self) -> Result<(), MergeError> {
         for (rhs_epoch, (rhs_clk, rhs_vehicles)) in rhs {
             if let Some((clk, vehicles)) = self.get_mut(rhs_epoch) {
                 // exact epoch (both timestamp and flag) did exist
@@ -777,11 +793,11 @@ impl Merge for Record {
 }
 
 impl Split for Record {
-    fn split(&self, epoch: Epoch) -> Result<(Self, Self), split::Error> {
+    fn split(&self, epoch: Epoch) -> Result<(Self, Self), SplitError> {
         let r0 = self
             .iter()
             .flat_map(|(k, v)| {
-                if k.0 < epoch {
+                if k.epoch < epoch {
                     Some((*k, v.clone()))
                 } else {
                     None
@@ -791,7 +807,7 @@ impl Split for Record {
         let r1 = self
             .iter()
             .flat_map(|(k, v)| {
-                if k.0 >= epoch {
+                if k.epoch >= epoch {
                     Some((*k, v.clone()))
                 } else {
                     None
@@ -800,11 +816,11 @@ impl Split for Record {
             .collect();
         Ok((r0, r1))
     }
-    fn split_dt(&self, duration: Duration) -> Result<Vec<Self>, split::Error> {
+    fn split_dt(&self, duration: Duration) -> Result<Vec<Self>, SplitError> {
         let mut curr = Self::new();
         let mut ret: Vec<Self> = Vec::new();
         let mut prev: Option<Epoch> = None;
-        for ((epoch, flag), data) in self {
+        for (key, data) in self {
             if let Some(p_epoch) = prev {
                 let dt = *epoch - p_epoch;
                 if dt >= duration {
@@ -1576,11 +1592,11 @@ pub(crate) fn code_multipath(rec: &Record) -> HashMap<ObsKey, Observation> {
 mod test {
     use super::*;
     fn parse_and_format_helper(ver: Version, epoch_str: &str, expected_flag: EpochFlag) {
-        let first = epoch::parse_utc("2020 01 01 00 00  0.1000000").unwrap();
-        let data: BTreeMap<SV, HashMap<Observable, ObservationData>> = BTreeMap::new();
-        let header = Header::default().with_version(ver).with_observation_fields(
-            crate::observation::HeaderFields::default().with_time_of_first_obs(first),
-        );
+        let first = parse_utc_epoch("2020 01 01 00 00  0.1000000").unwrap();
+        let data: BTreeMap<SV, HashMap<Observable, Observation>> = BTreeMap::new();
+        let header = Header::default()
+            .with_version(ver)
+            .with_observation_fields(HeaderFields::default().with_time_of_first_obs(first));
         let ts = TimeScale::UTC;
         let clock_offset: Option<f64> = None;
 
