@@ -34,8 +34,8 @@ rustdoc-args = ["--cfg", "docrs", "--generate-link-to-definition"]
 
 [dependencies]
 thiserror = "1"
-map_3d = "0.1.5"
 itertools = "0.13.0"
+anise = "0.4.2"
 hifitime = "4.0.0-alpha"
 gnss-rs = { version = "2.2.1", features = ["serde"] }
 rinex-qc-traits = { path = "../qc-traits", version = "=0.2", optional = true }

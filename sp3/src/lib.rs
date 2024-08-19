@@ -9,7 +9,6 @@ extern crate rinex_qc_traits as qc_traits;
 
 use gnss::prelude::{Constellation, SV};
 use hifitime::{Duration, Epoch, ParsingError as EpochParsingError, TimeScale};
-use map_3d::{ecef2aer, rad2deg, Ellipsoid};
 use std::collections::BTreeMap;
 
 use gnss_rs::constellation::ParsingError as ConstellationParsingError;
@@ -21,6 +20,8 @@ use qc_traits::processing::{
     Decimate, DecimationFilter, DecimationFilterType, FilterItem, MaskFilter, MaskOperand, Masking,
     Preprocessing,
 };
+
+use anise::prelude::{Almanac, Frame, Orbit};
 
 #[cfg(test)]
 mod tests;
@@ -51,14 +52,10 @@ use serde::{Deserialize, Serialize};
 
 use std::path::Path;
 
-/*
- * 3D position
- */
-type Vector3D = (f64, f64, f64);
-
 pub mod prelude {
     pub use crate::{version::Version, DataType, Error, OrbitType, SP3};
     // Pub re-export
+    pub use anise::prelude::{Almanac, Frame, Orbit};
     pub use gnss::prelude::{Constellation, SV};
     pub use hifitime::{Duration, Epoch, TimeScale};
 }
@@ -176,45 +173,47 @@ pub struct SP3Entry {
     /// Clock offset variation, with 0.1ns/s scaling with 1E-16 theoretical precision.
     /// Rarely present.
     pub clock_rate: Option<f64>,
-    /// Position vector expressed in the coordinates system, scaling is km and precision
-    /// down to 1mm, depending on fit technique.
-    pub position: Vector3D,
-    /// Possible velocity vector (rarely present) expressed in [km/s] in the same
-    /// reference frame.
-    pub velocity: Option<Vector3D>,
+    /// [Orbit] with state vector define in [km] with 1mm precision.
+    /// Velocity might not be present, it depends on the input file
+    pub orbit: Orbit,
 }
 
 impl SP3Entry {
-    /// Builds new [SP3Entry] with given position and all other
-    /// fields are unknown.
-    pub fn from_position(position: Vector3D) -> Self {
+    /// Builds new [SP3Entry] with ECEF position coordinates in km
+    pub fn from_position(x_km: f64, y_km: f64, z_km: f64, t: Epoch, frame: Frame) -> Self {
         Self {
-            position,
-            clock: None,
-            velocity: None,
-            clock_rate: None,
-        }
-    }
-    /// Builds new [SP3Entry] with given position and velocity vector,
-    /// any other fields are unknown
-    pub fn from_position_velocity(position: Vector3D, velocity: Vector3D) -> Self {
-        Self {
-            position,
             clock: None,
             clock_rate: None,
-            velocity: Some(velocity),
+            orbit: Orbit::from_position(x_km, y_km, z_km, t, frame),
         }
     }
-    /// Copies and returns [Self] with given position vector
-    pub fn with_position(&self, position: Vector3D) -> Self {
+    /// Builds new [SP3Entry] with ECEF position coordinates in km and velocity in km/s
+    pub fn from_position_velocity(
+        x_km: f64,
+        y_km: f64,
+        z_km: f64,
+        vel_x_kms: f64,
+        vel_y_kms: f64,
+        vel_z_kms: f64,
+    ) -> Self {
+        let pos_vel = Vector6::new(x_km, y_km, z_km, vel_x_kms, vel_y_kms, vel_z_kms);
+        Self {
+            clock: None,
+            clock_rate: None,
+            orbit: Orbit::from_cartesian_pos_vel(pos_vel),
+        }
+    }
+    /// Copies and returns [Self] with ECEF position coordinates in km
+    pub fn with_position(&self, x_km: f64, y_km: f64, z_km: f64, t: Epoch, frame: Frame) -> Self {
         let mut s = self.clone();
-        s.position = position;
+        s.orbit = Orbit::from_position(x_km, y_km, z_km, t, frame);
         s
     }
-    /// Copies and returns [Self] with given velocity vector
-    pub fn with_velocity(&self, velocity: Vector3D) -> Self {
+    /// Copies and returns [Self] with velocity in km/s expressed in ECEF
+    pub fn with_velocity(&self, x_km_s: f64, y_km_s: f64, z_km_s: f64) -> Self {
         let mut s = self.clone();
-        s.velocity = Some(velocity);
+        let vel_km_s = Vector3::new(x_km_s, y_km_s, z_km_s);
+        s.orbit.with_velocity_km_s(vel_km_s);
         s
     }
     /// Copies and returns [Self] with given clock offset
@@ -455,7 +454,7 @@ impl SP3 {
                         if let Some(clk) = clk {
                             data.insert(
                                 key,
-                                SP3Entry::from_position((x_km, y_km, z_km)).with_clock_offset(clk),
+                                SP3Entry::from_position(x_km, y_km, z_km).with_clock_offset(clk),
                             );
                         } else {
                             data.insert(key, SP3Entry::from_position((x_km, y_km, z_km)));
@@ -486,10 +485,11 @@ impl SP3 {
                         if let Some(clk) = clk {
                             data.insert(
                                 key,
-                                SP3Entry::from_position((0.0, 0.0, 0.0)).with_clock_rate(clk),
+                                SP3Entry::from_position(0.0, 0.0, 0.0, )
+                                .with_clock_rate(clk),
                             );
                         } else {
-                            data.insert(key, SP3Entry::from_position((0.0, 0.0, 0.0)));
+                            data.insert(key, SP3Entry::from_position(0.0, 0.0, 0.0)));
                         }
                     }
                 }
@@ -537,28 +537,43 @@ impl SP3 {
     pub fn sv(&self) -> impl Iterator<Item = SV> + '_ {
         self.sv.iter().copied()
     }
-    /// Returns an Iterator over SV position estimates, in km with 1mm precision
-    /// and expressed in [self.coord_system] (always fixed body frame).
-    pub fn sv_position(&self) -> impl Iterator<Item = (Epoch, SV, Vector3D)> + '_ {
-        self.data.iter().map(|(k, v)| (k.epoch, k.sv, v.position))
+    /// [Orbit] Iterator with state vectors expressed in km with 1mm precision.
+    pub fn sv_orbit(&self) -> impl Iterator<Item = (Epoch, SV, Orbit)> + '_ {
+        self.data.iter().map(|(k, v)| (k.epoch, k.sv, v.orbit))
     }
-    /// Returns an Iterator over SV elevation and azimuth angle, both in degrees.
-    /// ref_geo: referance position expressed in decimal degrees
-    pub fn sv_elevation_azimuth(
+    /// Returns state vector Iterator, expressed in km with 1mm precision.
+    pub fn sv_position_km(&self) -> impl Iterator<Item = (Epoch, SV, f64, f64, f64)> + '_ {
+        self.sv_orbit().map(|(t, sv, orb)| {
+            let cartesian = orb.to_cartesian_pos_vel();
+            (t, sv, cartesian[0], cartesian[1], cartesian[2])
+        })
+    }
+    /// Returns velocity vector Iterator, expressed in km
+    pub fn sv_velocity_km_s(&self) -> impl Iterator<Item = (Epoch, SV, f64, f64, f64)> + '_ {
+        self.sv_orbit().filter_map(|(t, sv, orb)| {
+            if orb.vmag_km_s() > 0.0 {
+                let cartesian = orb.to_cartesian_pos_vel();
+                Some((t, sv, cartesian[3], cartesian[4], cartesian[5]))
+            } else {
+                None
+            }
+        })
+    }
+    /// [SV] attitude as (azimuth, elevation, range) Iterator.
+    /// Units: degrees, degrees, km.
+    pub fn sv_azimuth_elev_range(
         &self,
-        ref_geo: Vector3D,
-    ) -> impl Iterator<Item = (Epoch, SV, (f64, f64))> + '_ {
-        self.sv_position().map(move |(t, sv, (x_km, y_km, z_km))| {
-            let (azim, elev, _) = ecef2aer(
-                x_km * 1.0E3,
-                y_km * 1.0E3,
-                z_km * 1.0E3,
-                ref_geo.0,
-                ref_geo.1,
-                ref_geo.2,
-                Ellipsoid::WGS84,
-            );
-            (t, sv, (rad2deg(elev), rad2deg(azim)))
+        rx_orbit: Orbit,
+    ) -> impl Iterator<Item = (Epoch, SV, f64, f64, f64)> + '_ {
+        self.sv_orbit().filter_map(|(t, sv, orb)| {
+            if let Ok(azelrange) = azimuth_elevation_range(orb, rx_orbit) {
+                let azim_deg = azelrange.azimuth_deg;
+                let elev_deg = azelrange.elevation_deg;
+                let range_km = azelrange.range;
+                Some((t, sv, azim_deg, elev_deg, range_km))
+            } else {
+                None
+            }
         })
     }
     /// Returns an Iterator over SV velocities estimates,
@@ -584,116 +599,9 @@ impl SP3 {
             Some((k.epoch, k.sv, rate))
         })
     }
-    /// Interpolate Clock (offset) at desired "t" expressed in the timescale you want.
-    /// SP3 files usually have a 15' sampling interval which makes this operation
-    /// most likely incorrect. You should either use higher sample rate to reduce
-    /// the error generated by interpolation, or use different products like
-    /// high precision Clock RINEX files.
-    pub fn sv_clock_interpolate(&self, t: Epoch, sv: SV) -> Option<f64> {
-        let before = self
-            .sv_clock()
-            .filter_map(|(clk_t, clk_sv, value)| {
-                if clk_t <= t && clk_sv == sv {
-                    Some((clk_t, value))
-                } else {
-                    None
-                }
-            })
-            .last()?;
-        let after = self
-            .sv_clock()
-            .filter_map(|(clk_t, clk_sv, value)| {
-                if clk_t > t && clk_sv == sv {
-                    Some((clk_t, value))
-                } else {
-                    None
-                }
-            })
-            .reduce(|k, _| k)?;
-        let (before_t, before_clk) = before;
-        let (after_t, after_clk) = after;
-        let dt = (after_t - before_t).to_seconds();
-        let mut bias = (after_t - t).to_seconds() / dt * before_clk;
-        bias += (t - before_t).to_seconds() / dt * after_clk;
-        Some(bias)
-    }
     /// Returns an Iterator over [`Comments`] contained in this file
     pub fn comments(&self) -> impl Iterator<Item = &String> + '_ {
         self.comments.iter()
-    }
-    /// Interpolates SV position at single instant `t`, results expressed in kilometers
-    /// and same reference frame. Typical interpolations vary between 7 and 11,
-    /// to preserve the data precision.
-    /// For an evenly spaced SP3 file, operation is feasible on Epochs
-    /// contained in the interval ](N +1)/2 * τ;  T - (N +1)/2 * τ],
-    /// where N is the interpolation order, τ the epoch interval (15 ' is the standard
-    /// in SP3) and T the last Epoch in this file. See [Bibliography::Japhet2021].
-    pub fn sv_position_interpolate(&self, sv: SV, t: Epoch, order: usize) -> Option<Vector3D> {
-        let odd_order = order % 2 > 0;
-        let sv_position: Vec<_> = self
-            .sv_position()
-            .filter_map(|(e, svnn, (x, y, z))| {
-                if sv == svnn {
-                    Some((e, (x, y, z)))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        /*
-         * Determine closest Epoch in time
-         */
-        let center = match sv_position
-            .iter()
-            .find(|(e, _)| (*e - t).abs() < self.epoch_interval)
-        {
-            Some(center) => center,
-            None => {
-                /*
-                 * Failed to determine central Epoch for this SV:
-                 * empty data set: should not happen
-                 */
-                return None;
-            },
-        };
-        // println!("CENTRAL EPOCH : {:?}", center); //DEBUG
-        let center_pos = match sv_position.iter().position(|(e, _)| *e == center.0) {
-            Some(center) => center,
-            None => {
-                /* will never happen at this point*/
-                return None;
-            },
-        };
-
-        let (min_before, min_after): (usize, usize) = match odd_order {
-            true => ((order + 1) / 2, (order + 1) / 2),
-            false => (order / 2, order / 2 + 1),
-        };
-
-        if center_pos < min_before || sv_position.len() - center_pos < min_after {
-            /* can't design time window */
-            return None;
-        }
-
-        let mut polynomials = Vector3D::default();
-        let offset = center_pos - min_before;
-
-        for i in 0..order + 1 {
-            let mut li = 1.0_f64;
-            let (e_i, (x_i, y_i, z_i)) = sv_position[offset + i];
-            for j in 0..order + 1 {
-                let (e_j, _) = sv_position[offset + j];
-                if j != i {
-                    li *= (t - e_j).to_seconds();
-                    li /= (e_i - e_j).to_seconds();
-                }
-            }
-            polynomials.0 += x_i * li;
-            polynomials.1 += y_i * li;
-            polynomials.2 += z_i * li;
-        }
-
-        Some(polynomials)
     }
 }
 
@@ -759,8 +667,9 @@ impl Merge for SP3 {
                 if let Some(rate) = entry.clock_rate {
                     lhs_entry.clock_rate = Some(rate);
                 }
-                if let Some(velocity) = entry.velocity {
-                    lhs_entry.velocity = Some(velocity);
+                if lhs_entry.orbit.vmag_km_s() == 0.0 && entry.orbit.vmag_km_s() > 0.0 {
+                    let pos_vel = entry.orbit.to_cartesian_pos_vel();
+                    lhs_entry.orbit.with_velocity_km_s(Vector3::new(pos_vel[3], pos_vel[4], pos_vel[5]));
                 }
             } else {
                 if !self.epoch.contains(&key.epoch) {
