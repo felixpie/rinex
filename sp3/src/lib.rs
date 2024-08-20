@@ -21,7 +21,12 @@ use qc_traits::processing::{
     Preprocessing,
 };
 
-use anise::prelude::{Almanac, Frame, Orbit};
+use anise::{
+    astro::AzElRange,
+    constants::frames::IAU_EARTH_FRAME,
+    math::{Vector3, Vector6},
+    prelude::{Almanac, Frame, Orbit},
+};
 
 #[cfg(test)]
 mod tests;
@@ -195,12 +200,14 @@ impl SP3Entry {
         vel_x_kms: f64,
         vel_y_kms: f64,
         vel_z_kms: f64,
+        t: Epoch,
+        frame: Frame,
     ) -> Self {
         let pos_vel = Vector6::new(x_km, y_km, z_km, vel_x_kms, vel_y_kms, vel_z_kms);
         Self {
             clock: None,
             clock_rate: None,
-            orbit: Orbit::from_cartesian_pos_vel(pos_vel),
+            orbit: Orbit::from_cartesian_pos_vel(pos_vel, t, frame),
         }
     }
     /// Copies and returns [Self] with ECEF position coordinates in km
@@ -382,12 +389,14 @@ impl SP3 {
         let mut constellation = Constellation::default();
         let mut pc_count = 0_u8;
 
-        let mut coord_system = String::from("Unknown");
-        let mut orbit_type = OrbitType::default();
         let mut agency = String::from("Unknown");
         let mut week_counter = (0_u32, 0_f64);
         let mut epoch_interval = Duration::default();
         let mut mjd_start = (0_u32, 0_f64);
+
+        let earth_cef = IAU_EARTH_FRAME; // TODO improve!
+        let mut coord_system = String::from("Unknown");
+        let mut orbit_type = OrbitType::default();
 
         let mut vehicles: Vec<SV> = Vec::new();
         let mut comments = Comments::new();
@@ -439,7 +448,7 @@ impl SP3 {
                     continue; // tolerates malformed positions
                 }
                 let entry = PositionEntry::from_str(line)?;
-                let (sv, (x_km, y_km, z_km), clk) = entry.to_parts();
+                let (sv, (x_km, y_km, z_km), clock) = entry.to_parts();
 
                 //TODO : move this into %c config frame
                 if !vehicles.contains(&sv) {
@@ -449,16 +458,18 @@ impl SP3 {
                 if x_km != 0.0_f64 && y_km != 0.0_f64 && z_km != 0.0_f64 {
                     let key = SP3Key { epoch, sv };
                     if let Some(e) = data.get_mut(&key) {
-                        e.position = (x_km, y_km, z_km);
+                        e.orbit = Orbit::from_position(x_km, y_km, z_km, epoch, earth_cef);
+                        e.clock = clock;
                     } else {
-                        if let Some(clk) = clk {
-                            data.insert(
-                                key,
-                                SP3Entry::from_position(x_km, y_km, z_km).with_clock_offset(clk),
-                            );
-                        } else {
-                            data.insert(key, SP3Entry::from_position((x_km, y_km, z_km)));
-                        }
+                        data.insert(
+                            key,
+                            if let Some(clock) = clock {
+                                SP3Entry::from_position(x_km, y_km, z_km, epoch, earth_cef)
+                                    .with_clock_offset(clock)
+                            } else {
+                                SP3Entry::from_position(x_km, y_km, z_km, epoch, earth_cef)
+                            },
+                        );
                     }
                 }
             }
@@ -467,7 +478,7 @@ impl SP3 {
                     continue; // tolerates malformed velocities
                 }
                 let entry = VelocityEntry::from_str(line)?;
-                let (sv, (vel_x, vel_y, vel_z), clk) = entry.to_parts();
+                let (sv, (vel_x, vel_y, vel_z), clk_rate) = entry.to_parts();
 
                 //TODO : move this into %c config frame
                 if !vehicles.contains(&sv) {
@@ -477,19 +488,26 @@ impl SP3 {
                 if vel_x != 0.0_f64 && vel_y != 0.0_f64 && vel_z != 0.0_f64 {
                     let key = SP3Key { epoch, sv };
                     if let Some(e) = data.get_mut(&key) {
-                        *e = e.with_velocity((vel_x, vel_y, vel_z));
-                        if let Some(clk) = clk {
-                            *e = e.with_clock_rate(clk);
+                        *e = e.with_velocity(vel_x, vel_y, vel_z);
+                        if let Some(clk_rate) = clk_rate {
+                            *e = e.with_clock_rate(clk_rate);
                         }
                     } else {
-                        if let Some(clk) = clk {
+                        if let Some(clk_rate) = clk_rate {
                             data.insert(
                                 key,
-                                SP3Entry::from_position(0.0, 0.0, 0.0, )
-                                .with_clock_rate(clk),
+                                SP3Entry::from_position_velocity(
+                                    0.0, 0.0, 0.0, vel_x, vel_y, vel_z, epoch, earth_cef,
+                                )
+                                .with_clock_rate(clk_rate),
                             );
                         } else {
-                            data.insert(key, SP3Entry::from_position(0.0, 0.0, 0.0)));
+                            data.insert(
+                                key,
+                                SP3Entry::from_position_velocity(
+                                    0.0, 0.0, 0.0, vel_x, vel_y, vel_z, epoch, earth_cef,
+                                ),
+                            );
                         }
                     }
                 }
@@ -542,18 +560,22 @@ impl SP3 {
         self.data.iter().map(|(k, v)| (k.epoch, k.sv, v.orbit))
     }
     /// Returns state vector Iterator, expressed in km with 1mm precision.
-    pub fn sv_position_km(&self) -> impl Iterator<Item = (Epoch, SV, f64, f64, f64)> + '_ {
+    pub fn sv_position_km(&self) -> impl Iterator<Item = (Epoch, SV, Vector3)> + '_ {
         self.sv_orbit().map(|(t, sv, orb)| {
             let cartesian = orb.to_cartesian_pos_vel();
-            (t, sv, cartesian[0], cartesian[1], cartesian[2])
+            (
+                t,
+                sv,
+                Vector3::new(cartesian[0], cartesian[1], cartesian[2]),
+            )
         })
     }
-    /// Returns velocity vector Iterator, expressed in km
-    pub fn sv_velocity_km_s(&self) -> impl Iterator<Item = (Epoch, SV, f64, f64, f64)> + '_ {
+    /// Returns position and velocity vector Iterator, expressed in km with 1mm and 0.1 um/s precision
+    pub fn sv_position_velocity_km_s(&self) -> impl Iterator<Item = (Epoch, SV, Vector6)> + '_ {
         self.sv_orbit().filter_map(|(t, sv, orb)| {
             if orb.vmag_km_s() > 0.0 {
                 let cartesian = orb.to_cartesian_pos_vel();
-                Some((t, sv, cartesian[3], cartesian[4], cartesian[5]))
+                Some((t, sv, cartesian))
             } else {
                 None
             }
@@ -561,27 +583,14 @@ impl SP3 {
     }
     /// [SV] attitude as (azimuth, elevation, range) Iterator.
     /// Units: degrees, degrees, km.
-    pub fn sv_azimuth_elev_range(
-        &self,
+    pub fn sv_azimuth_elevation_range<'a>(
+        &'a self,
         rx_orbit: Orbit,
-    ) -> impl Iterator<Item = (Epoch, SV, f64, f64, f64)> + '_ {
-        self.sv_orbit().filter_map(|(t, sv, orb)| {
-            if let Ok(azelrange) = azimuth_elevation_range(orb, rx_orbit) {
-                let azim_deg = azelrange.azimuth_deg;
-                let elev_deg = azelrange.elevation_deg;
-                let range_km = azelrange.range;
-                Some((t, sv, azim_deg, elev_deg, range_km))
-            } else {
-                None
-            }
-        })
-    }
-    /// Returns an Iterator over SV velocities estimates,
-    /// in 10^-1 m/s with 0.1 um/s precision.
-    pub fn sv_velocities(&self) -> impl Iterator<Item = (Epoch, SV, Vector3D)> + '_ {
-        self.data.iter().filter_map(|(k, v)| {
-            let velocity = v.velocity?;
-            Some((k.epoch, k.sv, velocity))
+        almanac: &'a Almanac,
+    ) -> impl Iterator<Item = (Epoch, SV, AzElRange)> + 'a {
+        self.sv_orbit().filter_map(move |(t, sv, orb)| {
+            let azelrg = almanac.azimuth_elevation_range_sez(orb, rx_orbit).ok()?;
+            Some((t, sv, azelrg))
         })
     }
     /// Returns an Iterator over Clock offsets with theoretical 1E-12 precision.
@@ -669,7 +678,9 @@ impl Merge for SP3 {
                 }
                 if lhs_entry.orbit.vmag_km_s() == 0.0 && entry.orbit.vmag_km_s() > 0.0 {
                     let pos_vel = entry.orbit.to_cartesian_pos_vel();
-                    lhs_entry.orbit.with_velocity_km_s(Vector3::new(pos_vel[3], pos_vel[4], pos_vel[5]));
+                    lhs_entry
+                        .orbit
+                        .with_velocity_km_s(Vector3::new(pos_vel[3], pos_vel[4], pos_vel[5]));
                 }
             } else {
                 if !self.epoch.contains(&key.epoch) {

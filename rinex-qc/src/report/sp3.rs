@@ -9,7 +9,6 @@ use crate::report::shared::SamplingReport;
 
 pub struct SP3Page {
     has_clock: bool,
-    has_velocity: bool,
     has_clock_drift: bool,
     satellites: Vec<SV>,
     sampling: SamplingReport,
@@ -23,14 +22,6 @@ impl Render for SP3Page {
                     tr {
                         th class="is-info" {
                             "General"
-                        }
-                    }
-                    tr {
-                        th {
-                            "Velocity"
-                        }
-                        td {
-                            (self.has_velocity.to_string())
                         }
                     }
                     tr {
@@ -129,7 +120,6 @@ impl SP3Report {
                         SP3Page {
                             has_clock: focused.sv_clock().count() > 0,
                             sampling: SamplingReport::from_sp3(&focused),
-                            has_velocity: focused.sv_velocities().count() > 0,
                             has_clock_drift: focused.sv_clock_rate().count() > 0,
                             satellites,
                         },
