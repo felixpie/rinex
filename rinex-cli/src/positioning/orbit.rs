@@ -41,11 +41,12 @@ impl<'a, 'b> Orbits<'a, 'b> {
                 if let Some(sp3) = ctx.data.sp3() {
                     if let Some(atx) = ctx.data.antex() {
                         info!("Orbit source created: operating with Ultra Precise Orbits.");
-                        Box::new(sp3.sv_position().filter_map(|(t, sv, (x_km, y_km, z_km))| {
+                        Box::new(sp3.sv_position_km().filter_map(|(t, sv, pos)| {
                             // TODO: needs rework and support all frequencies
                             let delta = atx.sv_antenna_apc_offset(t, sv, Carrier::L1)?;
                             let delta = Vector3::new(delta.0, delta.1, delta.2);
-                            let r_sat = Vector3::new(x_km * 1.0E3, y_km * 1.0E3, z_km * 1.0E3);
+                            let r_sat =
+                                Vector3::new(pos[0] * 1.0E3, pos[1] * 1.0E3, pos[2] * 1.0E3);
                             let k = -r_sat
                                 / (r_sat[0].powi(2) + r_sat[1].powi(2) + r_sat[3].powi(2)).sqrt();
 
@@ -70,7 +71,10 @@ impl<'a, 'b> Orbits<'a, 'b> {
                     } else {
                         info!("Orbit source created: operating with Precise Orbits.");
                         warn!("Cannot determine exact precise coordinates without ANTEX data: expect tiny errors (<1m).");
-                        Box::new(sp3.sv_position())
+                        Box::new(
+                            sp3.sv_position_km()
+                                .map(|(t, sv, pos)| (t, sv, (pos[0], pos[1], pos[2]))),
+                        )
                     }
                 } else {
                     warn!("Orbit source created: operating without Precise Orbits.");
