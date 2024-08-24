@@ -11,13 +11,14 @@ impl GM {
     pub const GAL: f64 = 3.986004418E14;
 }
 
+/// Angular velocity in rad/s
 pub(crate) struct Omega;
 
 impl Omega {
-    pub const GPS: f64 = 7.2921151467E-5;
-    pub const BDS: f64 = 7.292115E-5;
-    pub const GLO: f64 = 7.292115E-5;
-    pub const GAL: f64 = 7.2921151467E-5;
+    pub const GPS_RAD_S: f64 = 7.2921151467E-5;
+    pub const BDS_RAD_S: f64 = 7.292115E-5;
+    pub const GLO_RAD_S: f64 = 7.292115E-5;
+    pub const GAL_RAD_S: f64 = 7.2921151467E-5;
 }
 
 /// - 2 * sqrt(gm) / c / c
@@ -30,9 +31,8 @@ impl DtrF {
     pub const GAL: f64 = -0.00000000044428073090439775;
 }
 
-//
-#[allow(dead_code)]
 pub(crate) struct MaxIterNumber;
+
 #[allow(dead_code)]
 impl MaxIterNumber {
     /// Maximum number of iterations to calculate the anastomosis angle
@@ -53,12 +53,12 @@ impl Constants {
         }
     }
     /// Earth rotation rate
-    pub const fn omega(sv: SV) -> f64 {
+    pub const fn omega_rad_s(sv: SV) -> f64 {
         match sv.constellation {
-            Constellation::BeiDou => Omega::BDS,
-            Constellation::Galileo => Omega::GAL,
-            Constellation::Glonass => Omega::GLO,
-            _ => Omega::GPS,
+            Constellation::BeiDou => Omega::BDS_RAD_S,
+            Constellation::Galileo => Omega::GAL_RAD_S,
+            Constellation::Glonass => Omega::GLO_RAD_S,
+            _ => Omega::GPS_RAD_S,
         }
     }
     ///  Auxiliary Quantities for Calculating Relativistic Effects in Clock Correction

@@ -1,10 +1,4 @@
 use super::{orbits::closest_nav_standards, NavMsgType, OrbitItem};
-use crate::constants::Constants;
-use crate::{
-    constants, epoch,
-    prelude::{Constellation, Duration, Epoch, TimeScale, SV},
-    version::Version,
-};
 
 #[cfg(feature = "nav")]
 use crate::prelude::Almanac;
@@ -23,8 +17,11 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use thiserror::Error;
 
-use crate::epoch::{
-    parse_in_timescale as parse_epoch_in_timescale, ParsingError as EpochParsingError,
+use crate::{
+    constants::{Constants, MaxIterNumber, Omega},
+    epoch::{parse_in_timescale as parse_epoch_in_timescale, ParsingError as EpochParsingError},
+    prelude::{Constellation, Duration, Epoch, TimeScale, SV},
+    version::Version,
 };
 
 #[cfg(feature = "nav")]
@@ -103,7 +100,7 @@ impl EphemerisHelper {
     fn geo_orbit_to_ecef_rotation_matrix(&self) -> Rotation<f64, 3> {
         let rotation_x = Rotation::from_axis_angle(&Vector3::x_axis(), 5.0f64.to_radians());
         let rotation_z =
-            Rotation::from_axis_angle(&Vector3::z_axis(), -constants::Omega::BDS * self.t_k);
+            Rotation::from_axis_angle(&Vector3::z_axis(), -Omega::BDS_RAD_S * self.t_k);
         rotation_z * rotation_x
     }
 
@@ -182,8 +179,8 @@ impl EphemerisHelper {
         let fd_zgk = fd_y * sin_i_k + y * self.fd_i_k * cos_i_k;
 
         let rx = Rotation3::from_axis_angle(&Vector3::x_axis(), 5.0);
-        let rz = Rotation3::from_axis_angle(&Vector3::z_axis(), -constants::Omega::BDS * self.t_k);
-        let (sin_omega_tk, cos_omega_tk) = (constants::Omega::BDS * self.t_k).sin_cos();
+        let rz = Rotation3::from_axis_angle(&Vector3::z_axis(), -Omega::BDS_RAD_S * self.t_k);
+        let (sin_omega_tk, cos_omega_tk) = (Omega::BDS_RAD_S * self.t_k).sin_cos();
         let fd_rz = self.fd_omega_k
             * na::Matrix3::new(
                 -sin_omega_tk,
@@ -215,8 +212,8 @@ impl EphemerisHelper {
         let fd_zgk = fd_y * sin_i_k + y * self.fd_i_k * cos_i_k;
 
         let rx = Rotation3::from_axis_angle(&Vector3::x_axis(), 5.0);
-        let rz = Rotation3::from_axis_angle(&Vector3::z_axis(), -constants::Omega::BDS * self.t_k);
-        let (sin_omega_tk, cos_omega_tk) = (constants::Omega::BDS * self.t_k).sin_cos();
+        let rz = Rotation3::from_axis_angle(&Vector3::z_axis(), -Omega::BDS_RAD_S * self.t_k);
+        let (sin_omega_tk, cos_omega_tk) = (Omega::BDS_RAD_S * self.t_k).sin_cos();
         let fd_rz = self.fd_omega_k
             * na::Matrix3::new(
                 -sin_omega_tk,
@@ -480,7 +477,7 @@ impl Ephemeris {
         let (svnn, rem) = line.split_at(4);
         let sv = SV::from_str(svnn.trim())?;
         let (epoch, rem) = rem.split_at(19);
-        let epoch = epoch::parse_in_timescale(epoch.trim(), ts)?;
+        let epoch = parse_epoch_in_timescale(epoch.trim(), ts)?;
 
         let (clk_bias, rem) = rem.split_at(19);
         let (clk_dr, clk_drr) = rem.split_at(19);
@@ -591,8 +588,8 @@ impl Ephemeris {
     fn ephemeris_helper(&self, sv: SV, t_sv: Epoch, t: Epoch) -> Option<EphemerisHelper> {
         // const
         let gm_m3_s2 = Constants::gm(sv);
-        let omega = Constants::omega(sv);
         let dtr_f = Constants::dtr_f(sv);
+        let earth_omega_rad_s = Constants::omega_rad_s(sv);
 
         let t_k = self.t_k(sv, t)?;
         if t_k < 0.0 {
@@ -624,7 +621,7 @@ impl Ephemeris {
             i += 1;
             e_k_lst = e_k;
         }
-        if i >= constants::MaxIterNumber::KEPLER {
+        if i >= MaxIterNumber::KEPLER {
             error!("{} kepler iteration overflow", sv);
         }
 
@@ -647,7 +644,7 @@ impl Ephemeris {
         let di_k = perturbations.cis * x2_sin_phi_k + perturbations.cic * x2_cos_phi_k;
 
         // first derivatives
-        let fd_omega_k = perturbations.omega_dot - omega;
+        let fd_omega_k = perturbations.omega_dot - earth_omega_rad_s;
 
         let fd_e_k = n / (1.0 - kepler.e * e_k.cos());
         let fd_phi_k = ((1.0 + kepler.e) / (1.0 - kepler.e)).sqrt()
@@ -675,10 +672,11 @@ impl Ephemeris {
         // ascending node longitude correction (RAAN ?)
         let omega_k = if sv.is_beidou_geo() {
             // BeiDou [IGSO]
-            kepler.omega_0 + perturbations.omega_dot * t_k - omega * kepler.toe
+            kepler.omega_0 + perturbations.omega_dot * t_k - earth_omega_rad_s * kepler.toe
         } else {
             // GPS, Galileo, BeiDou [MEO]
-            kepler.omega_0 + (perturbations.omega_dot - omega) * t_k - omega * kepler.toe
+            kepler.omega_0 + (perturbations.omega_dot - earth_omega_rad_s) * t_k
+                - earth_omega_rad_s * kepler.toe
         };
 
         // corrected inclination angle
@@ -694,7 +692,7 @@ impl Ephemeris {
         // earth rotation
         let t_sv_gpst = t_sv.to_time_scale(TimeScale::GPST);
         let t_gpst = t.to_time_scale(TimeScale::GPST);
-        let earth_rot = omega * (t_sv_gpst - t_gpst).to_seconds();
+        let earth_rot = earth_omega_rad_s * (t_sv_gpst - t_gpst).to_seconds();
         let (sin_earth_rot, cos_earth_rot) = earth_rot.sin_cos();
 
         //let r_sv = (
@@ -722,7 +720,7 @@ impl Ephemeris {
             kepler.e,
             i_k.to_degrees(),
             omega_k.to_degrees(),
-            omega.to_degrees(),
+            earth_omega_rad_s.to_degrees(),
             v_k.to_degrees(),
             t_gpst,
             EARTH_J2000.with_mu_km3_s2(gm_m3_s2 * 1e-9),
