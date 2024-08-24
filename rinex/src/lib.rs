@@ -93,6 +93,7 @@ pub mod prelude {
     pub use crate::observation::EpochFlag;
     pub use crate::types::Type as RinexType;
     pub use crate::{Error, Rinex};
+    pub use anise::astro::PhysicsResult;
     // pub re-export
     #[cfg(feature = "nav")]
     pub use anise::{

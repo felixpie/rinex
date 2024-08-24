@@ -205,16 +205,17 @@ pub fn main() -> Result<(), Error> {
         },
         None => {
             if let Some(data_pos) = ctx_position {
-                let (x, y, z) = data_pos.to_ecef_wgs84();
-                let (lat, lon, _) = ecef2geodetic(x, y, z, Ellipsoid::WGS84);
-                let (lat_ddeg, lon_ddeg) = (lat.to_degrees(), lon.to_degrees());
+                let (x_km, y_km, z_km) = data_pos.to_position_km();
+                let (lat_ddeg, long_ddeg, h_km) = data_pos
+                    .to_geodetic()
+                    .unwrap_or_else(|e| panic!("reference position is not valid: {}", e));
                 info!(
-                    "Position defined in dataset: {:?} [ECEF] (lat={:.5}°, lon={:.5}°)",
-                    (x, y, z),
+                    "Position defined in dataset: lat={:.5}°, lon={:.5}° alt={:.5}m)",
                     lat_ddeg,
-                    lon_ddeg
+                    long_ddeg,
+                    h_km * 1.0E3,
                 );
-                Some((x, y, z))
+                Some((x_km * 1.0E3, y_km * 1.0E3, z_km * 1.0E3))
             } else {
                 /*
                  * Dataset does not contain any position,
@@ -246,7 +247,19 @@ pub fn main() -> Result<(), Error> {
                     // We currently require remote site
                     // to have its geodetic marker declared
                     if let Some(reference_point) = data.reference_position() {
-                        let (base_x0_m, base_y0_m, base_z0_m) = reference_point.to_ecef_wgs84();
+                        let (lat_ddeg, long_ddeg, h_km) =
+                            reference_point.to_geodetic().unwrap_or_else(|e| {
+                                panic!("base station reference position is not valid: {}", e)
+                            });
+                        let (base_x0_km, base_y0_km, base_z0_km) = reference_point.to_position_km();
+                        let (base_x0_m, base_y0_m, base_z0_m) =
+                            (base_x0_km / 1.0E3, base_y0_km / 1.0E3, base_z0_km / 1.0E3);
+                        info!(
+                            "Base Station reference position: lat={:.5}°, lon={:.5}° alt={:.5}m)",
+                            lat_ddeg,
+                            long_ddeg,
+                            h_km * 1.0E3
+                        );
                         if let Some(rx_ecef) = rx_ecef {
                             let baseline_m = ((base_x0_m - rx_ecef.0).powi(2)
                                 + (base_y0_m - rx_ecef.1).powi(2)

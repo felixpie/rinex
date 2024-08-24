@@ -161,10 +161,8 @@ pub struct OrbitReport {
 
 impl OrbitReport {
     pub fn new(ctx: &QcContext, reference: Option<GroundPosition>, force_brdc_sky: bool) -> Self {
-        let (x0, y0, z0) = reference.unwrap_or_default().to_ecef_wgs84();
-        let (x0_km, y0_km, z0_km) = (x0 / 1000.0, y0 / 1000.0, z0 / 1000.0);
-
-        let rx_orb = Orbit::from_position(x0_km, y0_km, z0_km, Default::default(), ctx.earth_cef);
+        let reference = reference.unwrap_or_default();
+        let rx_orb = reference.orbit();
 
         // TODO: brdc needs a timeserie..
         #[cfg(feature = "sp3")]
@@ -185,8 +183,6 @@ impl OrbitReport {
         #[cfg(feature = "sp3")]
         if let Some(sp3) = ctx.sp3() {
             for (t, sv_sp3, sp3_azelrg) in sp3.sv_azimuth_elevation_range(rx_orb, &ctx.almanac) {
-                let rx_orbit = Orbit::from_position(x0_km, y0_km, z0_km, t, ctx.earth_cef);
-
                 let el_deg = sp3_azelrg.elevation_deg;
                 let az_deg = sp3_azelrg.azimuth_deg;
 
@@ -217,7 +213,7 @@ impl OrbitReport {
                 if brdc_skyplot {
                     let brdc = ctx.brdc_navigation().unwrap();
                     if let Some(el_az_range) =
-                        brdc.sv_azimuth_elevation_range(sv_sp3, t, rx_orbit, &ctx.almanac)
+                        brdc.sv_azimuth_elevation_range(sv_sp3, t, rx_orb, &ctx.almanac)
                     {
                         let (el_deg, az_deg) = (el_az_range.elevation_deg, el_az_range.azimuth_deg);
                         if let Some(t_brdc) = t_brdc.get_mut(&sv_sp3) {

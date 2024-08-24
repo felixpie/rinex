@@ -8,7 +8,7 @@ use thiserror::Error;
 use maud::{html, Markup, Render};
 
 /// Meteo Observation Sensor
-#[derive(Default, Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Default, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Sensor {
     /// Physics measured by this sensor
@@ -135,11 +135,11 @@ impl std::fmt::Display for Sensor {
         }
         writeln!(f, "{} SENSOR MOD/TYPE/ACC", self.observable)?;
 
-        if let Some(pos) = self.position {
-            let (x, y, z) = pos.to_ecef_wgs84();
-            write!(f, "{:14.4}", x)?;
-            write!(f, "{:14.4}", y)?;
-            write!(f, "{:14.4}", z)?;
+        if let Some(ground_pos) = self.position {
+            let (x_km, y_km, z_km) = ground_pos.to_position_km();
+            write!(f, "{:14.4}", x_km * 1.0E3)?;
+            write!(f, "{:14.4}", y_km * 1.0E3)?;
+            write!(f, "{:14.4}", z_km * 1.0E3)?;
             let h = self.height.unwrap_or(0.0);
             write!(f, "{:14.4}", h)?;
             writeln!(f, " {} SENSOR POS XYZ/H", self.observable)?

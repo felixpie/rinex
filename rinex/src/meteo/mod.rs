@@ -14,7 +14,7 @@ use std::str::FromStr;
 use qc_traits::processing::{FilterItem, MaskFilter, MaskOperand};
 
 /// Meteo specific header fields
-#[derive(Debug, Clone, Default, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct HeaderFields {
     /// Observation types contained in this file

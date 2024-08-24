@@ -32,6 +32,7 @@ use std::collections::HashMap;
 use std::io::prelude::*;
 use std::str::FromStr;
 
+use anise::constants::frames::IAU_EARTH_FRAME;
 use hifitime::Unit;
 use thiserror::Error;
 
@@ -633,8 +634,15 @@ impl Header {
 
                 for sensor in meteo.sensors.iter_mut() {
                     if sensor.observable == observable {
-                        *sensor = sensor.with_position(GroundPosition::from_ecef_wgs84((x, y, z)));
-                        *sensor = sensor.with_height(h);
+                        let (x_km, y_km, z_km) = (x / 1.0E3, y / 1.0E3, z / 1.0E3);
+                        let sensor_pos = GroundPosition::from_position_km(
+                            x_km,
+                            y_km,
+                            z_km,
+                            Default::default(),
+                            IAU_EARTH_FRAME,
+                        );
+                        *sensor = sensor.with_position(sensor_pos).with_height(h);
                     }
                 }
             } else if marker.contains("LEAP SECOND") {
@@ -677,7 +685,17 @@ impl Header {
                     z.to_string(),
                 )))?;
 
-                ground_position = Some(GroundPosition::from_ecef_wgs84((x, y, z)));
+                let (x_km, y_km, z_km) = (x / 1.0E3, y / 1.0E3, z / 1.0E3);
+
+                let marker_pos = GroundPosition::from_position_km(
+                    x_km,
+                    y_km,
+                    z_km,
+                    Default::default(),
+                    IAU_EARTH_FRAME,
+                );
+
+                ground_position = Some(marker_pos);
             } else if marker.contains("ANT # / TYPE") {
                 let (model, rem) = content.split_at(20);
                 let (sn, _) = rem.split_at(20);

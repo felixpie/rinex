@@ -5,6 +5,7 @@ use std::{
     str::FromStr,
 };
 
+use anise::constants::frames::IAU_EARTH_FRAME;
 use itertools::Itertools;
 
 use clap::{value_parser, Arg, ArgAction, ArgMatches, ColorChoice, Command};
@@ -417,8 +418,18 @@ Otherwise it gets automatically picked up."))
         if let Some(position) = self.manual_ecef() {
             Some(position)
         } else {
-            self.manual_geodetic()
-                .map(|position| GroundPosition::from_geodetic(position).to_ecef_wgs84())
+            self.manual_geodetic().map(|(lat_deg, long_deg, h_m)| {
+                let pos = GroundPosition::from_geodetic(
+                    lat_deg,
+                    long_deg,
+                    h_m / 1.0E3,
+                    Default::default(),
+                    IAU_EARTH_FRAME,
+                )
+                .unwrap_or_else(|e| panic!("failed to determine manual position: {}", e));
+                let (x_km, y_km, z_km) = pos.to_position_km();
+                (x_km * 1.0E3, y_km * 1.0E3, z_km * 1.0E3)
+            })
         }
     }
     /// True if File Operations to generate data is being deployed
@@ -465,8 +476,14 @@ Otherwise it gets automatically picked up."))
     /// Returns QcConfig from command line
     pub fn qc_config(&self) -> QcConfig {
         QcConfig {
-            manual_reference: if let Some(manual) = self.manual_position() {
-                Some(GroundPosition::from_ecef_wgs84(manual))
+            manual_reference: if let Some((x_m, y_m, z_m)) = self.manual_position() {
+                Some(GroundPosition::from_position_km(
+                    x_m / 1.0E3,
+                    y_m / 1.0E3,
+                    z_m / 1.0E3,
+                    Default::default(),
+                    IAU_EARTH_FRAME,
+                ))
             } else {
                 None
             },

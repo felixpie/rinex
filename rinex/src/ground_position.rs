@@ -1,5 +1,11 @@
+use crate::constants::Omega;
 use dms_coordinates::DMS;
-use map_3d::{deg2rad, ecef2geodetic, geodetic2ecef, rad2deg, Ellipsoid};
+
+use anise::{
+    astro::PhysicsResult,
+    constants::frames::IAU_EARTH_FRAME,
+    prelude::{Epoch, Frame, Orbit},
+};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -7,52 +13,59 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "qc")]
 use maud::{html, Markup, Render};
 
-#[derive(Default, Copy, Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Copy, Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct GroundPosition(f64, f64, f64);
+pub struct GroundPosition(Orbit);
 
-impl From<(f64, f64, f64)> for GroundPosition {
-    fn from(xyz: (f64, f64, f64)) -> Self {
-        Self(xyz.0, xyz.1, xyz.2)
-    }
-}
-
-impl From<GroundPosition> for (f64, f64, f64) {
-    fn from(val: GroundPosition) -> Self {
-        (val.0, val.1, val.2)
+impl Default for GroundPosition {
+    fn default() -> Self {
+        Self::from_position_km(0.0, 0.0, 0.0, Default::default(), IAU_EARTH_FRAME)
     }
 }
 
 impl GroundPosition {
-    /// Builds Self from ECEF WGS84 coordinates
-    pub fn from_ecef_wgs84(pos: (f64, f64, f64)) -> Self {
-        Self(pos.0, pos.1, pos.2)
+    pub fn orbit(&self) -> Orbit {
+        self.0
     }
-    /// Builds Self from Geodetic coordinates in ddeg
-    pub fn from_geodetic(pos: (f64, f64, f64)) -> Self {
-        let (x, y, z) = pos;
-        let (x, y, z) = geodetic2ecef(deg2rad(x), deg2rad(y), deg2rad(z), Ellipsoid::WGS84);
-        Self(x, y, z)
+    pub fn epoch(&self) -> Epoch {
+        self.0.epoch
     }
-    /// Converts Self to ECEF WGS84
-    pub fn to_ecef_wgs84(&self) -> (f64, f64, f64) {
-        (self.0, self.1, self.2)
+    /// Builds [Self] from ECEF coordinates in km
+    pub fn from_position_km(x_km: f64, y_km: f64, z_km: f64, t: Epoch, frame: Frame) -> Self {
+        Self(Orbit::from_position(x_km, y_km, z_km, t, frame))
     }
-    /// Converts Self to geodetic coordinates in ddeg
-    pub fn to_geodetic(&self) -> (f64, f64, f64) {
-        let (x, y, z) = (self.0, self.1, self.2);
-        let (lat, lon, alt) = ecef2geodetic(x, y, z, Ellipsoid::WGS84);
-        (rad2deg(lat), rad2deg(lon), alt)
+    /// Builds [Self] from Geodetic angles in degrees
+    pub fn from_geodetic(
+        lat_deg: f64,
+        long_deg: f64,
+        h_km: f64,
+        t: Epoch,
+        frame: Frame,
+    ) -> PhysicsResult<Self> {
+        let angular_vel_deg_s = Omega::GPS_RAD_S.to_degrees();
+        let orb = Orbit::try_latlongalt(lat_deg, long_deg, h_km, angular_vel_deg_s, t, frame)?;
+        Ok(Self(orb))
+    }
+    /// Converts [Self] to ECEF coordinates in km
+    pub fn to_position_km(&self) -> (f64, f64, f64) {
+        let state = self.0.to_cartesian_pos_vel();
+        (state[0], state[1], state[2])
+    }
+    /// Converts [Self] to geodetic angles in degrees
+    pub fn to_geodetic(&self) -> PhysicsResult<(f64, f64, f64)> {
+        self.0.latlongalt()
     }
     /// Returns position altitude
-    pub fn altitude(&self) -> f64 {
-        self.to_geodetic().2
+    pub fn altitude_km(&self) -> PhysicsResult<f64> {
+        let (_, _, h_km) = self.to_geodetic()?;
+        Ok(h_km)
     }
 }
 
 impl std::fmt::Display for GroundPosition {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "WGS84 ({}m {}m {}m)", self.0, self.1, self.2)
+        let (x_km, y_km, z_km) = self.to_position_km();
+        write!(f, "x={}km, y={}km, z={}km", x_km, y_km, z_km)
     }
 }
 
@@ -61,20 +74,24 @@ impl std::fmt::Display for GroundPosition {
  */
 impl std::fmt::UpperHex for GroundPosition {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:14.4}{:14.4}{:14.4}", self.0, self.1, self.2)
+        let (x_km, y_km, z_km) = self.to_position_km();
+        let (x_m, y_m, z_m) = (x_km * 1.0E3, y_km * 1.0E3, z_km * 1.0E3);
+        write!(f, "{:14.4}{:14.4}{:14.4}", x_m, y_m, z_m)
     }
 }
 
 #[cfg(feature = "qc")]
 impl Render for GroundPosition {
     fn render(&self) -> Markup {
-        let ecef = (self.0, self.1, self.2);
-        let geo = self.to_geodetic();
+        let (x_km, y_km, z_km) = self.to_position_km();
+        let (lat_deg, long_deg, h_km) = self
+            .to_geodetic()
+            .unwrap_or_else(|e| panic!("error: {}", e));
         html! {
             table {
                 tr {
                     th {
-                        "ECEF (WGS84)"
+                        "ECEF"
                     }
                 }
                 tr {
@@ -82,19 +99,19 @@ impl Render for GroundPosition {
                         "X"
                     }
                     td {
-                        (format!("{:.3} m", ecef.0))
+                        (format!("{:.5} km", x_km))
                     }
                     th {
                         "Y"
                     }
                     td {
-                        (format!("{:.3} m", ecef.1))
+                        (format!("{:.5} km", y_km))
                     }
                     th {
                        "Z"
                     }
                     td {
-                        (format!("{:.3} m", ecef.2))
+                        (format!("{:.5} km", z_km))
                     }
                 }
                 tr {
@@ -107,19 +124,19 @@ impl Render for GroundPosition {
                         "Latitude"
                     }
                     td {
-                        (format!("{:.6}°", geo.0))
+                        (format!("{:.6}°", lat_deg))
                     }
                     th {
                         "Longitude"
                     }
                     td {
-                        (format!("{:.6}°", geo.1))
+                        (format!("{:.6}°", long_deg))
                     }
                     th {
                         "Altitude"
                     }
                     td {
-                        (format!("{:.3} m", geo.2))
+                        (format!("{:.5}m", h_km * 1.0E3))
                     }
                 }
                 tr {
@@ -127,13 +144,13 @@ impl Render for GroundPosition {
                         "DMS"
                     }
                     td {
-                        (DMS::from_ddeg_latitude(geo.0).to_string())
+                        (DMS::from_ddeg_latitude(lat_deg).to_string())
                     }
                     th {
                         "DMS"
                     }
                     td {
-                        (DMS::from_ddeg_longitude(geo.1).to_string())
+                        (DMS::from_ddeg_longitude(long_deg).to_string())
                     }
                 }
             }
