@@ -114,38 +114,44 @@ impl EphemerisHelper {
     }
 
     /// Calculate ecef position [km].
-    /// Applies to GPS, Galileo, BeiDou (MEO).
     fn ecef_position(&self) -> Vector3<f64> {
-        let (x, y, z) = self.r_sv;
-        let orbit_xyz = Vector3::new(x, y, z);
-        let ecef_xyz = self.meo_orbit_to_ecef_rotation_matrix() * orbit_xyz;
-        ecef_xyz / 1000.0
+        if self.sv.is_beidou_geo() {
+            self.beidou_geo_ecef_position()
+        } else {
+            let (x, y, z) = self.r_sv;
+            let orbit_xyz = Vector3::new(x, y, z);
+            let ecef_xyz = self.meo_orbit_to_ecef_rotation_matrix() * orbit_xyz;
+            ecef_xyz / 1000.0
+        }
     }
 
     /// Calculate ecef velocity [km/s].
-    /// Applies to GPS, Galileo, BeiDou (MEO).
     fn ecef_velocity(&self) -> Vector3<f64> {
-        let (x, y, _) = self.r_sv;
-        let (sin_omega_k, cos_omega_k) = self.omega_k.sin_cos();
-        let (sin_i_k, cos_i_k) = self.i_k.sin_cos();
-        // First Derivative of orbit position
-        let (fd_x, fd_y) = self.orbit_velocity();
-        // First Derivative of rotation Matrix
-        let mut fd_r = na::SMatrix::<f64, 3, 4>::zeros();
-        fd_r[(0, 0)] = cos_omega_k;
-        fd_r[(0, 1)] = -sin_omega_k * cos_i_k;
-        fd_r[(0, 2)] = -(x * sin_omega_k + y * cos_omega_k * cos_i_k);
-        fd_r[(0, 3)] = y * sin_omega_k * sin_i_k;
-        fd_r[(1, 0)] = sin_omega_k;
-        fd_r[(1, 1)] = cos_omega_k * cos_i_k;
-        fd_r[(1, 2)] = x * cos_omega_k - y * sin_omega_k * cos_i_k;
-        fd_r[(1, 3)] = y * cos_omega_k * sin_i_k;
-        fd_r[(2, 1)] = sin_i_k;
-        fd_r[(2, 3)] = y * cos_i_k;
+        if self.sv.is_beidou_geo() {
+            self.beidou_geo_ecef_velocity()
+        } else {
+            let (x, y, _) = self.r_sv;
+            let (sin_omega_k, cos_omega_k) = self.omega_k.sin_cos();
+            let (sin_i_k, cos_i_k) = self.i_k.sin_cos();
+            // First Derivative of orbit position
+            let (fd_x, fd_y) = self.orbit_velocity();
+            // First Derivative of rotation Matrix
+            let mut fd_r = na::SMatrix::<f64, 3, 4>::zeros();
+            fd_r[(0, 0)] = cos_omega_k;
+            fd_r[(0, 1)] = -sin_omega_k * cos_i_k;
+            fd_r[(0, 2)] = -(x * sin_omega_k + y * cos_omega_k * cos_i_k);
+            fd_r[(0, 3)] = y * sin_omega_k * sin_i_k;
+            fd_r[(1, 0)] = sin_omega_k;
+            fd_r[(1, 1)] = cos_omega_k * cos_i_k;
+            fd_r[(1, 2)] = x * cos_omega_k - y * sin_omega_k * cos_i_k;
+            fd_r[(1, 3)] = y * cos_omega_k * sin_i_k;
+            fd_r[(2, 1)] = sin_i_k;
+            fd_r[(2, 3)] = y * cos_i_k;
 
-        let rhs = Vector4::new(fd_x, fd_y, self.fd_omega_k, self.fd_i_k);
-        let vel = fd_r * rhs;
-        vel / 1000.0
+            let rhs = Vector4::new(fd_x, fd_y, self.fd_omega_k, self.fd_i_k);
+            let vel = fd_r * rhs;
+            vel / 1000.0
+        }
     }
 
     /// Calculate ECEF position [km] and velocity [km/s] of MEO/IGSO sv
@@ -368,10 +374,7 @@ impl Ephemeris {
     /// Return ToE expressed as [Epoch]
     pub fn toe(&self, sv_ts: TimeScale) -> Option<Epoch> {
         // TODO: in CNAV V4 TOC is said to be TOE... ...
-        let mut week = self.get_week()?;
-        if sv_ts == TimeScale::GST {
-            week -= 1024;
-        }
+        let week = self.get_week()?;
         let sec = self.get_orbit_f64("toe")?;
         let week_dur = Duration::from_days((week * 7) as f64);
         let sec_dur = Duration::from_seconds(sec);
