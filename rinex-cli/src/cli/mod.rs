@@ -426,7 +426,7 @@ Otherwise it gets automatically picked up."))
                     Default::default(),
                     IAU_EARTH_FRAME,
                 )
-                .unwrap_or_else(|e| panic!("failed to determine manual position: {}", e));
+                .unwrap_or_else(|e| panic!("invalid manual position: {}", e));
                 let (x_km, y_km, z_km) = pos.to_position_km();
                 (x_km * 1.0E3, y_km * 1.0E3, z_km * 1.0E3)
             })

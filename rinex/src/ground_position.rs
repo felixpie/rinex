@@ -84,9 +84,7 @@ impl std::fmt::UpperHex for GroundPosition {
 impl Render for GroundPosition {
     fn render(&self) -> Markup {
         let (x_km, y_km, z_km) = self.to_position_km();
-        let (lat_deg, long_deg, h_km) = self
-            .to_geodetic()
-            .unwrap_or_else(|e| panic!("error: {}", e));
+        let (lat_deg, long_deg, h_km) = self.to_geodetic().unwrap_or_else(|_| (0.0, 0.0, 0.0));
         html! {
             table {
                 tr {
