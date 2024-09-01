@@ -3,7 +3,6 @@ use dms_coordinates::DMS;
 
 use anise::{
     astro::PhysicsResult,
-    constants::frames::IAU_EARTH_FRAME,
     prelude::{Epoch, Frame, Orbit},
 };
 
@@ -16,12 +15,6 @@ use maud::{html, Markup, Render};
 #[derive(Copy, Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GroundPosition(Orbit);
-
-impl Default for GroundPosition {
-    fn default() -> Self {
-        Self::from_position_km(0.0, 0.0, 0.0, Default::default(), IAU_EARTH_FRAME)
-    }
-}
 
 impl GroundPosition {
     pub fn orbit(&self) -> Orbit {

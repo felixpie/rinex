@@ -5,7 +5,6 @@ use std::{
     str::FromStr,
 };
 
-use anise::constants::frames::IAU_EARTH_FRAME;
 use itertools::Itertools;
 
 use clap::{value_parser, Arg, ArgAction, ArgMatches, ColorChoice, Command};
@@ -414,7 +413,7 @@ Otherwise it gets automatically picked up."))
         Some(geo)
     }
     /// Returns RX Position possibly specified by user
-    pub fn manual_position(&self) -> Option<(f64, f64, f64)> {
+    pub fn manual_position(&self, ctx: &QcContext) -> Option<(f64, f64, f64)> {
         if let Some(position) = self.manual_ecef() {
             Some(position)
         } else {
@@ -424,7 +423,7 @@ Otherwise it gets automatically picked up."))
                     long_deg,
                     h_m / 1.0E3,
                     Default::default(),
-                    IAU_EARTH_FRAME,
+                    ctx.earth_cef,
                 )
                 .unwrap_or_else(|e| panic!("invalid manual position: {}", e));
                 let (x_km, y_km, z_km) = pos.to_position_km();
@@ -474,15 +473,15 @@ Otherwise it gets automatically picked up."))
         hasher.finish()
     }
     /// Returns QcConfig from command line
-    pub fn qc_config(&self) -> QcConfig {
+    pub fn qc_config(&self, ctx: &QcContext) -> QcConfig {
         QcConfig {
-            manual_reference: if let Some((x_m, y_m, z_m)) = self.manual_position() {
+            manual_reference: if let Some((x_m, y_m, z_m)) = self.manual_position(ctx) {
                 Some(GroundPosition::from_position_km(
                     x_m / 1.0E3,
                     y_m / 1.0E3,
                     z_m / 1.0E3,
                     Default::default(),
-                    IAU_EARTH_FRAME,
+                    ctx.earth_cef,
                 ))
             } else {
                 None

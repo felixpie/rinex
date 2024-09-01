@@ -191,7 +191,7 @@ pub fn main() -> Result<(), Error> {
      *   this is useful in case we don't want to bother
      *   but we must be sure that the OBSRINEX describes the correct location
      */
-    let rx_ecef = match cli.manual_position() {
+    let rx_ecef = match cli.manual_position(&data_ctx) {
         Some((x, y, z)) => {
             let (lat, lon, _) = ecef2geodetic(x, y, z, Ellipsoid::WGS84);
             let (lat_ddeg, lon_ddeg) = (lat.to_degrees(), lon.to_degrees());
@@ -342,7 +342,7 @@ pub fn main() -> Result<(), Error> {
     }
 
     // report
-    let cfg = cli.qc_config();
+    let cfg = cli.qc_config(&ctx.data);
     let mut report = Report::new(&cli, &ctx, cfg);
 
     // customization

@@ -168,6 +168,26 @@ impl QcReport {
         };
         let summary = QcSummary::new(&context, &cfg);
         let summary_only = cfg.report == QcReportType::Summary;
+
+        let mut orbital_proj = false;
+
+        if ref_position.is_some() {
+            #[cfg(feature = "sp3")]
+            if (context.has_sp3() || context.has_brdc_navigation())
+                && !summary_only
+                && ref_position.is_some()
+            {
+                orbital_proj = true;
+            }
+            #[cfg(not(feature = "sp3"))]
+            if context.has_brdc_navigation() && !summary_only {
+                orbital_proj = true;
+            }
+        } else {
+            warn!("Orbital projection is not feasible: requires a reference position");
+        }
+
+        #[cfg(feature = "sp3")]
         Self {
             custom_chapters: Vec::new(),
             // navi: {
@@ -213,10 +233,10 @@ impl QcReport {
             },
             #[cfg(not(feature = "sp3"))]
             orbit: {
-                if context.has_brdc_navigation() && !summary_only {
+                if orbital_proj {
                     Some(OrbitReport::new(
                         context,
-                        ref_position,
+                        ref_position.unwrap(),
                         cfg.force_brdc_skyplot,
                     ))
                 } else {
@@ -225,10 +245,10 @@ impl QcReport {
             },
             #[cfg(feature = "sp3")]
             orbit: {
-                if (context.has_sp3() || context.has_brdc_navigation()) && !summary_only {
+                if orbital_proj {
                     Some(OrbitReport::new(
                         context,
-                        ref_position,
+                        ref_position.unwrap(),
                         cfg.force_brdc_skyplot,
                     ))
                 } else {

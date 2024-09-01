@@ -1,7 +1,4 @@
-use rinex::{
-    navigation::Ephemeris,
-    prelude::{Constellation, Epoch, GroundPosition, Orbit, Rinex, SV},
-};
+use rinex::prelude::{Constellation, Epoch, GroundPosition, Orbit, Rinex, SV};
 use std::collections::{BTreeMap, HashMap};
 
 use qc_traits::processing::{Filter, Preprocessing};
@@ -160,8 +157,7 @@ pub struct OrbitReport {
 }
 
 impl OrbitReport {
-    pub fn new(ctx: &QcContext, reference: Option<GroundPosition>, force_brdc_sky: bool) -> Self {
-        let reference = reference.unwrap_or_default();
+    pub fn new(ctx: &QcContext, reference: GroundPosition, force_brdc_sky: bool) -> Self {
         let rx_orb = reference.orbit();
 
         // TODO: brdc needs a timeserie..

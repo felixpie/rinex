@@ -2355,7 +2355,7 @@ impl Rinex {
         if sv.constellation.is_sbas() {
             let (toc, (_, _, eph)) = self
                 .ephemeris()
-                .filter(|(t_i, (_, sv_i, eph_i))| sv == *sv_i)
+                .filter(|(_, (_, sv_i, _))| sv == *sv_i)
                 .reduce(|k, _| k)?;
             Some((*toc, *toc, eph))
         } else {
