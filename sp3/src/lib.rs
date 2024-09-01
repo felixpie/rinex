@@ -23,6 +23,7 @@ use qc_traits::processing::{
 
 use anise::{
     astro::AzElRange,
+    constants::frames::EARTH_ITRF93,
     constants::frames::IAU_EARTH_FRAME,
     math::{Vector3, Vector6},
     prelude::{Almanac, Frame, Orbit},
@@ -290,6 +291,8 @@ pub enum Error {
     UnknownOrbitType(String),
     #[error("file i/o error")]
     DataParsingError(#[from] std::io::Error),
+    #[error("failed to define a reference frame")]
+    ReferenceFrameDef,
 }
 
 #[derive(Debug, Error)]
@@ -372,14 +375,10 @@ fn parse_epoch(content: &str, time_scale: TimeScale) -> Result<Epoch, ParsingErr
 }
 
 impl SP3 {
-    /// Parses given SP3 file, with possible seamless
-    /// .gz decompression, if compiled with the "flate2" feature.
-    pub fn from_path(path: &Path) -> Result<Self, Error> {
-        let fullpath = path.to_string_lossy().to_string();
-        Self::from_file(&fullpath)
-    }
-    /// See [Self::from_path]
-    pub fn from_file(path: &str) -> Result<Self, Error> {
+    /// Parse [Self] from (full) path description, using prebuilt
+    /// [Almanac] definition. Seamless gzip decompression may apply
+    /// when compiled with `flate2` feature and name is terminated by .gzip.
+    pub fn from_path<P: AsRef<Path>>(almanac: &Almanac, path: P) -> Result<Self, Error> {
         let reader = BufferedReader::new(path)?;
 
         let mut version = Version::default();
@@ -394,9 +393,25 @@ impl SP3 {
         let mut epoch_interval = Duration::default();
         let mut mjd_start = (0_u32, 0_f64);
 
-        let earth_cef = IAU_EARTH_FRAME; // TODO improve!
+        // TODO: [Frame/Almanac] and Kepler needs improvement
+        // following: <https://github.com/rtk-rs/gnss/pull/8>
+        // SV Orbit should be smart enough to determine the most appropriate frame
+        // And ANISE automatically rotate it internaly (if need be)
+        // Currently, we prefer ITRF93 and use EME2000 as a backup
+        // and expect tiny errors due to SV orbit being inacurately described
         let mut coord_system = String::from("Unknown");
         let mut orbit_type = OrbitType::default();
+        let earth_cef = if let Ok(itrf93) = almanac.frame_from_uid(EARTH_ITRF93) {
+            Some(itrf93)
+        } else {
+            if let Ok(iau_earth) = almanac.frame_from_uid(IAU_EARTH_FRAME) {
+                Some(iau_earth)
+            } else {
+                None
+            }
+        };
+
+        let earth_cef = earth_cef.ok_or(Error::ReferenceFrameDef)?;
 
         let mut vehicles: Vec<SV> = Vec::new();
         let mut comments = Comments::new();

@@ -1,4 +1,4 @@
-use rinex::prelude::{Constellation, Epoch, GroundPosition, Orbit, Rinex, SV};
+use rinex::prelude::{Constellation, Epoch, Frame, GroundPosition, Orbit, Rinex, SV};
 use std::collections::{BTreeMap, HashMap};
 
 use qc_traits::processing::{Filter, Preprocessing};
@@ -20,12 +20,12 @@ struct BrdcSp3Report {
 
 #[cfg(feature = "sp3")]
 impl BrdcSp3Report {
-    fn new(sp3: &SP3, brdc: &Rinex) -> Self {
+    fn new(earth_cef: Frame, sp3: &SP3, brdc: &Rinex) -> Self {
         let mut errors = BTreeMap::<SV, Vec<(Epoch, f64, f64, f64)>>::new();
         for (t_sp3, sv_sp3, sp3_orb) in sp3.sv_orbit() {
             let sp3_state = sp3_orb.to_cartesian_pos_vel();
             let (sp3_x, sp3_y, sp3_z) = (sp3_state[0], sp3_state[1], sp3_state[2]);
-            if let Some(brdc_orb) = brdc.sv_orbit(sv_sp3, t_sp3) {
+            if let Some(brdc_orb) = brdc.sv_orbit(earth_cef, sv_sp3, t_sp3) {
                 let brdc_state = brdc_orb.to_cartesian_pos_vel();
                 let (brdc_x, brdc_y, brdc_z) = (brdc_state[0], brdc_state[1], brdc_state[2]);
                 let (err_x_m, err_y_m, err_z_m) = (
@@ -159,6 +159,7 @@ pub struct OrbitReport {
 impl OrbitReport {
     pub fn new(ctx: &QcContext, reference: GroundPosition, force_brdc_sky: bool) -> Self {
         let rx_orb = reference.orbit();
+        let earth_cef = ctx.earth_cef;
 
         // TODO: brdc needs a timeserie..
         #[cfg(feature = "sp3")]
@@ -361,7 +362,7 @@ impl OrbitReport {
                                 let focused_nav = nav.filter(&filter);
                                 reports.insert(
                                     constellation,
-                                    BrdcSp3Report::new(&focused_sp3, &focused_nav),
+                                    BrdcSp3Report::new(earth_cef, &focused_sp3, &focused_nav),
                                 );
                             }
                         }

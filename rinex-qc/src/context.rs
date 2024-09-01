@@ -480,12 +480,53 @@ impl QcContext {
             false
         }
     }
-    /// Load a single RINEX file into Self.
+    /// Smart file parser and type guessing.
+    /// Load a single file into the dataset.
+    /// File format must be correctly supported.
+    pub fn load_file<P: AsRef<Path>>(&mut self, path: P) -> Result<(), Error> {
+        let path_ref = path.as_ref();
+        if let Ok(rinex) = Rinex::from_path(path_ref) {
+            let prod_type = ProductType::from(rinex.header.rinex_type);
+
+            // extend context
+            if let Some(paths) = self
+                .files
+                .iter_mut()
+                .filter_map(|(prod, files)| {
+                    if *prod == prod_type {
+                        Some(files)
+                    } else {
+                        None
+                    }
+                })
+                .reduce(|k, _| k)
+            {
+                if let Some(inner) = self.blob.get_mut(&prod_type).and_then(|k| k.as_mut_rinex()) {
+                    inner.merge_mut(&rinex)?;
+                    paths.push(path_ref.to_path_buf());
+                }
+                Ok(())
+            } else {
+                Ok(())
+            }
+        } else if let Ok(sp3) = SP3::from_path(&self.almanac, path) {
+            let prod_type = ProductType::HighPrecisionOrbit;
+            Err(Error::NonSupportedFileFormat)
+        } else {
+            Err(Error::NonSupportedFileFormat)
+        }
+    }
+    /// RINEX File parsing and appending attempt.
     /// File revision must be supported and must be correctly formatted
     /// for this operation to be effective.
-    pub fn load_rinex(&mut self, path: &Path, rinex: Rinex) -> Result<(), Error> {
-        let prod_type = ProductType::from(rinex.header.rinex_type);
+    pub fn add_rinex<P: AsRef<Path>>(&mut self, path: P) -> Result<(), Error> {
+        let path_ref = path.as_ref();
+        let filename = path_ref.file_name().ok_or(Error::FileNameDetermination)?;
+        let filename = filename.to_string_lossy().to_string();
+
         // extend context blob
+        let rinex = Rinex::from_path(path_ref)?;
+        let prod_type = ProductType::from(rinex.header.rinex_type);
         if let Some(paths) = self
             .files
             .iter_mut()
@@ -500,19 +541,20 @@ impl QcContext {
         {
             if let Some(inner) = self.blob.get_mut(&prod_type).and_then(|k| k.as_mut_rinex()) {
                 inner.merge_mut(&rinex)?;
-                paths.push(path.to_path_buf());
+                paths.push(path_ref.to_path_buf());
             }
         } else {
             self.blob.insert(prod_type, BlobData::Rinex(rinex));
-            self.files.insert(prod_type, vec![path.to_path_buf()]);
+            self.files.insert(prod_type, vec![path_ref.to_path_buf()]);
         }
+        info!("{} file loaded: \"{}\"", prod_type, filename);
         Ok(())
     }
-    /// Load a single SP3 file into Self.
+    /// SP3 File parsing and appending attempt.
     /// File revision must be supported and must be correctly formatted
     /// for this operation to be effective.
     #[cfg(feature = "sp3")]
-    pub fn load_sp3(&mut self, path: &Path, sp3: SP3) -> Result<(), Error> {
+    pub fn add_sp3(&mut self, path: &Path, sp3: SP3) -> Result<(), Error> {
         let prod_type = ProductType::HighPrecisionOrbit;
         // extend context blob
         if let Some(paths) = self

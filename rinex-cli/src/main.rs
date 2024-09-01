@@ -82,30 +82,14 @@ fn user_data_parsing(
         for entry in walkdir.into_iter().filter_map(|e| e.ok()) {
             if !entry.path().is_dir() {
                 let path = entry.path();
-                if let Ok(rinex) = Rinex::from_path(path) {
-                    let loading = ctx.load_rinex(path, rinex);
-                    if loading.is_ok() {
-                        info!("Loading RINEX file \"{}\"", path.display());
-                    } else {
-                        warn!(
-                            "failed to load RINEX file \"{}\": {}",
-                            path.display(),
-                            loading.err().unwrap()
-                        );
-                    }
-                } else if let Ok(sp3) = SP3::from_path(path) {
-                    let loading = ctx.load_sp3(path, sp3);
-                    if loading.is_ok() {
-                        info!("Loading SP3 file \"{}\"", path.display());
-                    } else {
-                        warn!(
-                            "failed to load SP3 file \"{}\": {}",
-                            path.display(),
-                            loading.err().unwrap()
-                        );
-                    }
-                } else {
-                    warn!("non supported file format \"{}\"", path.display());
+                match ctx.load_file(path) {
+                    Ok(_) => {},
+                    Err(Error::NonSupportedFileFormat) => {
+                        warn!("Non supported file format: {}", path.display());
+                    },
+                    Err(e) => {
+                        warn!("{} file loading failure: {}", path.display(), e);
+                    },
                 }
             }
         }

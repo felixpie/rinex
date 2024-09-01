@@ -2,8 +2,12 @@
 //! and integrated .gz decompression.
 #[cfg(feature = "flate2")]
 use flate2::read::GzDecoder;
-use std::fs::File;
-use std::io::BufReader; // Seek, SeekFrom};
+use std::{
+    fs::File,
+    io::{BufReader, Error, Read, Result as IoResult},
+    //io::{Seek, SeekFrom},
+    path::Path,
+};
 
 #[derive(Debug)]
 pub enum BufferedReader {
@@ -17,9 +21,15 @@ pub enum BufferedReader {
 impl BufferedReader {
     /// Builds a new BufferedReader for efficient file interation,
     /// with possible .gz decompression
-    pub fn new(path: &str) -> std::io::Result<Self> {
+    pub fn new<P: AsRef<Path>>(path: P) -> IoResult<Self> {
+        let path = path.as_ref();
+        let fullpath = path
+            .file_name()
+            .ok_or(Error::other("filename determination"))?;
+        let fullpath = fullpath.to_string_lossy().to_string();
+
         let f = File::open(path)?;
-        if path.ends_with(".gz") {
+        if fullpath.ends_with(".gz") {
             // --> gzip encoded
             #[cfg(feature = "flate2")]
             {
@@ -29,7 +39,7 @@ impl BufferedReader {
             {
                 panic!(".gz data requires --flate2 feature")
             }
-        } else if path.ends_with(".Z") {
+        } else if fullpath.ends_with(".Z") {
             panic!(".z decompresion is not supported: uncompress manually")
         } else {
             // Assumes no extra compression
@@ -38,8 +48,8 @@ impl BufferedReader {
     }
 }
 
-impl std::io::Read for BufferedReader {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, std::io::Error> {
+impl Read for BufferedReader {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
         match self {
             Self::PlainFile(ref mut h) => h.read(buf),
             #[cfg(feature = "flate2")]
@@ -49,7 +59,7 @@ impl std::io::Read for BufferedReader {
 }
 
 impl std::io::BufRead for BufferedReader {
-    fn fill_buf(&mut self) -> Result<&[u8], std::io::Error> {
+    fn fill_buf(&mut self) -> Result<&[u8], Error> {
         match self {
             Self::PlainFile(ref mut bufreader) => bufreader.fill_buf(),
             #[cfg(feature = "flate2")]

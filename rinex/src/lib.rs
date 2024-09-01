@@ -73,6 +73,8 @@ use observable::Observable;
 use observation::{Crinex, ObservationData};
 use version::Version;
 
+use anise::constants::frames::{EARTH_ITRF93, IAU_EARTH_FRAME};
+
 use production::{DataSource, DetailedProductionAttributes, ProductionAttributes, FFU, PPU};
 
 use hifitime::Unit;
@@ -2326,13 +2328,20 @@ impl Rinex {
     }
     /// Returns [SV] [Orbit]al state vector (if we can) at specified [Epoch] `t`.
     /// Self must be NAV RINEX.
-    pub fn sv_orbit(&self, sv: SV, t: Epoch) -> Option<Orbit> {
+    /// Currently, [Frame] in which we express [Orbit] must be passed
+    /// (to avoid cumbursome, repetitive calculations), but also because we
+    /// lack correct GNSS [Frame] definition:
+    /// <https://github.com/rtk-rs/gnss/pull/8>
+    ///
+    /// We recommend working with [EARTH_ITRF93] if you can, or [EARTH_J2000]
+    /// as backup.
+    pub fn sv_orbit(&self, frame: Frame, sv: SV, t: Epoch) -> Option<Orbit> {
         let (toc, _, eph) = self.sv_ephemeris(sv, t)?;
-        eph.kepler2position(sv, toc, t)
+        eph.kepler2position(frame, sv, toc, t)
     }
     /// Returns [SV] attitude vector (if we can) at specified [Epoch] `t`
     /// with respect to specified reference point expressed as an [Orbit].
-    /// [Self] must be NAV RINEX.
+    /// Requires prebuilt [Almanac], and [Self] must be NAV RINEX.
     pub fn sv_azimuth_elevation_range(
         &self,
         sv: SV,
@@ -2340,7 +2349,23 @@ impl Rinex {
         rx_orbit: Orbit,
         almanac: &Almanac,
     ) -> Option<AzElRange> {
-        let sv_orbit = self.sv_orbit(sv, t)?;
+        // TODO: [Frame/Almanac] and Kepler needs improvement
+        // following: <https://github.com/rtk-rs/gnss/pull/8>
+        // SV Orbit should be smart enough to determine the most appropriate frame
+        // And ANISE automatically rotate it internaly (if need be)
+        // Currently, we prefer ITRF93 and use EME2000 as a backup
+        // and expect tiny errors due to SV orbit being inacurately described
+        let frame_cef = if let Ok(itrf93) = almanac.frame_from_uid(EARTH_ITRF93) {
+            Some(itrf93)
+        } else {
+            if let Ok(iau_earth) = almanac.frame_from_uid(IAU_EARTH_FRAME) {
+                Some(iau_earth)
+            } else {
+                None
+            }
+        };
+        let frame_cef = frame_cef?;
+        let sv_orbit = self.sv_orbit(frame_cef, sv, t)?;
         let azelrange = almanac
             .azimuth_elevation_range_sez(sv_orbit, rx_orbit)
             .ok()?;

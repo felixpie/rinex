@@ -6,7 +6,8 @@ use crate::prelude::Almanac;
 #[cfg(feature = "nav")]
 use anise::{
     astro::AzElRange,
-    constants::frames::{EARTH_J2000, IAU_EARTH_FRAME},
+    constants::frames::EARTH_J2000,
+    //constants::frames::IAU_EARTH_FRAME,
     errors::AlmanacResult,
     math::{Vector3, Vector6},
     prelude::{Frame, Orbit},
@@ -773,7 +774,7 @@ impl Ephemeris {
     /// t_sv [Epoch] is the satellite free running clock.
     /// Self must be correctly selected from navigation record.
     /// See [Bibliography::AsceAppendix3], [Bibliography::JLe19] and [Bibliography::BeiDouICD]
-    pub fn kepler2position(&self, sv: SV, t_sv: Epoch, t: Epoch) -> Option<Orbit> {
+    pub fn kepler2position(&self, frame: Frame, sv: SV, t_sv: Epoch, t: Epoch) -> Option<Orbit> {
         if sv.constellation.is_sbas() || sv.constellation == Constellation::Glonass {
             let (x_km, y_km, z_km) = (
                 self.get_orbit_f64("satPosX")?,
@@ -781,7 +782,7 @@ impl Ephemeris {
                 self.get_orbit_f64("satPosZ")?,
             );
             // TODO: velocity + integration
-            Some(Orbit::from_position(x_km, y_km, z_km, t, IAU_EARTH_FRAME))
+            Some(Orbit::from_position(x_km, y_km, z_km, t, frame))
         } else {
             let helper = self.ephemeris_helper(sv, t_sv, t)?;
             let pos = helper.ecef_position();
@@ -789,7 +790,7 @@ impl Ephemeris {
             Some(Orbit::from_cartesian_pos_vel(
                 Vector6::new(pos[0], pos[1], pos[2], vel[0], vel[1], vel[2]),
                 t,
-                IAU_EARTH_FRAME,
+                frame,
             ))
         }
     }

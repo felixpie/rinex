@@ -11,7 +11,6 @@ use std::path::PathBuf;
 pub fn merge(ctx: &Context, matches: &ArgMatches) -> Result<(), Error> {
     let ctx_data = &ctx.data;
     let merge_path = matches.get_one::<PathBuf>("file").unwrap();
-
     let merge_filepath = merge_path.to_string_lossy().to_string();
 
     let rinex_b = Rinex::from_file(&merge_filepath)?;
