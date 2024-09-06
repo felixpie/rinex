@@ -5,7 +5,8 @@ use thiserror::Error;
 
 use crate::{
     epoch::{
-        format as format_epoch, parse_utc as parse_utc_epoch, ParsingError as EpochParsingError,
+        format as format_epoch, parse_in_timescale as parse_epoch_in_timescale,
+        parse_utc as parse_utc_epoch, Epoch, ParsingError as EpochParsingError,
     },
     merge::{Error as MergeError, Merge},
     observation::{flag::Error as FlagError, EpochFlag, HeaderFields, SNR},
@@ -202,7 +203,7 @@ pub(crate) fn parse_epoch(
     }
 
     let (date, rem) = line.split_at(offset);
-    let epoch = epoch::parse_in_timescale(date, ts)?;
+    let epoch = parse_epoch_in_timescale(date, ts)?;
     let (flag, rem) = rem.split_at(3);
     let flag = EpochFlag::from_str(flag.trim())?;
     let (n_sat, rem) = rem.split_at(3);
@@ -324,6 +325,9 @@ fn parse_v2(
     let mut obs_ptr = 0; // observable pointer
     let mut sv = SV::default();
     let mut observables: &Vec<Observable>;
+
+    let mut key = ObsKey::default();
+    let mut ret = Vec::<ObsKey, Observation>::with_capacity(8);
     //println!("{:?}", header_observables); // DEBUG
     //println!("\"{}\"", systems); // DEBUG
 
@@ -331,7 +335,7 @@ fn parse_v2(
     if systems.len() < svnn_size {
         // Can't even parse a single vehicle;
         // epoch descriptor is totally corrupt, stop here
-        return data;
+        return Default::default();
     }
 
     /*
@@ -352,11 +356,11 @@ fn parse_v2(
                     if let Ok(s) = SV::from_str(&format!("{}{:02}", c, prn)) {
                         sv = s;
                     } else {
-                        return data;
+                        return ret;
                     }
                 }
             },
-            None => return data,
+            None => return ret,
         }
     }
     sv_ptr += svnn_size; // increment pointer
@@ -369,7 +373,7 @@ fn parse_v2(
                 observables
             } else {
                 // failed to identify observations for this vehicle
-                return data;
+                return ret;
             }
         },
         false => {
@@ -377,7 +381,7 @@ fn parse_v2(
                 observables
             } else {
                 // failed to identify observations for this vehicle
-                return data;
+                return ret;
             }
         },
     };
@@ -437,10 +441,7 @@ fn parse_v2(
                         }
                     }
                     //println!("{} {:?} {:?} ==> {}", obs, lli, snr, obscodes[obs_ptr-1]); //DEBUG
-                    inner.insert(
-                        observables[obs_ptr - 1].clone(),
-                        Observation { obs, lli, snr },
-                    );
+                    ret.push((key, Observation { obs, lli, snr }));
                 } //f64::obs
             } // parsing all observations
             if nb_obs < nb_max_observables {
@@ -475,7 +476,7 @@ fn parse_v2(
                             if let Ok(s) = SV::from_str(&format!("{}{:02}", c, prn)) {
                                 sv = s;
                             } else {
-                                return data;
+                                return ret;
                             }
                         }
                     },
@@ -492,7 +493,7 @@ fn parse_v2(
                         observables
                     } else {
                         // failed to identify observations for this vehicle
-                        return data;
+                        return ret;
                     }
                 },
                 false => {
@@ -500,7 +501,7 @@ fn parse_v2(
                         observables
                     } else {
                         // failed to identify observations for this vehicle
-                        return data;
+                        return ret;
                     }
                 },
             };
@@ -522,6 +523,7 @@ fn parse_v3(
     let observable_width = 16; // data + 2 flags
 
     let mut sv = SV::default();
+    let mut key = ObsKey::default();
     let mut obs = Observable::default();
     let mut ret = Vec::<(ObsKey, Observation)>::new();
 
