@@ -26,8 +26,7 @@ pub fn diff(ctx: &Context, matches: &ArgMatches) -> Result<(), Error> {
         RinexType::ObservationData => {
             let rinex_a = ctx_data
                 .observation()
-                .expect("RINEX (A) - (B) requires OBS RINEX files");
-
+                .expect("RINEX (A) - (B) only applies to OBS RINEX files");
             //TODO: change this to crnx2rnx_mut()
             rinex_a.crnx2rnx().substract(&rinex_b.crnx2rnx())
         },
@@ -68,8 +67,10 @@ pub fn diff(ctx: &Context, matches: &ArgMatches) -> Result<(), Error> {
         .to_string_lossy()
         .to_string();
 
-    rinex_c.to_file(&fullpath)?;
-
-    info!("OBS RINEX \"{}\" has been generated", fullpath);
-    Ok(())
+    if matches.get_flag("csv") {
+    } else {
+        rinex_c.to_file(&fullpath)?;
+        info!("OBS RINEX \"{}\" has been generated", fullpath);
+        Ok(())
+    }
 }

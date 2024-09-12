@@ -5,11 +5,7 @@ use clap::ArgMatches;
 use rinex_qc::prelude::ProductType;
 
 #[cfg(feature = "csv")]
-use crate::fops::csv::{
-    write_nav_rinex as write_nav_rinex_csv,
-    // write_sp3 as write_sp3_csv,
-    write_obs_rinex as write_obs_rinex_csv,
-};
+use crate::fops::csv::write_rinex_csv;
 
 /*
  * Dumps current context (usually preprocessed)
@@ -18,7 +14,7 @@ use crate::fops::csv::{
 pub fn filegen(ctx: &Context, matches: &ArgMatches, submatches: &ArgMatches) -> Result<(), Error> {
     #[cfg(feature = "csv")]
     if submatches.get_flag("csv") {
-        write_csv(ctx, matches, submatches)?;
+        write_rinex_csv(ctx, matches, submatches)?;
         return Ok(());
     }
     #[cfg(not(feature = "csv"))]
@@ -27,51 +23,6 @@ pub fn filegen(ctx: &Context, matches: &ArgMatches, submatches: &ArgMatches) -> 
     }
 
     write(ctx, matches, submatches)?;
-    Ok(())
-}
-
-#[cfg(feature = "csv")]
-fn write_csv(ctx: &Context, matches: &ArgMatches, submatches: &ArgMatches) -> Result<(), Error> {
-    let ctx_data = &ctx.data;
-    if let Some(rinex) = ctx_data.rinex(ProductType::Observation) {
-        ctx.workspace.create_subdir("OBSERVATIONS");
-
-        let prod = custom_prod_attributes(rinex, submatches);
-
-        let output = ctx
-            .workspace
-            .root
-            .join("OBSERVATIONS")
-            .join(output_filename(rinex, matches, submatches, prod));
-        write_obs_rinex_csv(rinex, &output)?;
-
-        info!(
-            "{} dumped in {}",
-            ProductType::Observation,
-            output.display()
-        );
-
-        if let Some(brdc) = ctx_data.rinex(ProductType::BroadcastNavigation) {
-            ctx.workspace.create_subdir("BRDC");
-            let prod = custom_prod_attributes(brdc, submatches);
-            let output = ctx
-                .workspace
-                .root
-                .join("BRDC")
-                .join(output_filename(brdc, matches, submatches, prod));
-            write_nav_rinex_csv(rinex, brdc, &output)?;
-            info!(
-                "{} dumped in {}",
-                ProductType::BroadcastNavigation,
-                output.display()
-            );
-        }
-    }
-    if let Some(_) = ctx_data.sp3() {
-        // TODO
-        // write_sp3_csv(rinex, &output)?;
-        // info!("{} dumped in {}", ProductType::HighPrecisionOrbit, output);
-    }
     Ok(())
 }
 

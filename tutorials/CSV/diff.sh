@@ -1,25 +1,30 @@
 #! /bin/sh
-RINEX=test_resources/CRNX/V3/ESBC00DNK_R_20201770000_01D_30S_MO.crx.gz
+# We want to differentiate 1C and 5Q phase observations
+# from two separate receivers, that happen to have
+# the same clock.
+RINEX_A=OB712480.23O.gz
+RINEX_B=gps_10MSps.23O.gz
 
-# Since 1C and 5Q reprensents Both L1/E2 and L1/E5 depending
-# of which constellation we're talking about,
-# we need to proceed in two steps, first GPS then Galileo.
-FILTER="GPS;C1C,C5Q,D1C,D5Q;>=2020-06-05T12:00:00 GPST;<2020-06-25T13:00:00 GPST"
+# We only use the GPS observations to do so.
+# We're usually only interested in a single frequency when doing so, but this
+# is just an example.
+# We reduce to 1 hour dataset
+FILTER="GPS;L1C,L5Q"
 
+# Form RINEX(A-B)
+# -o: acts as the file prefix
 # -q: since we're generating data, we're not interested in opening the workspace
-# --csv: export to CSV
 ./target/release/rinex-cli \
     -q -o "GPS-L1L5" \
     -P "$FILTER" \
-    --fp $RINEX \
-    filegen --csv
+    --fp test_resources/OBS/V3/$RINEX_A \
+    diff test_resources/OBS/V3/$RINEX_B
 
-FILTER="Gal;C1C,C5Q,D1C,D5Q;>=2020-06-05T12:00:00 GPST;<2020-06-25T13:00:00 GPST"
-
+# Export A-B to CSV:
+# -o: acts as the CSV file prefix
 # -q: since we're generating data, we're not interested in opening the workspace
-# --csv: export to CSV
 ./target/release/rinex-cli \
-    -q -o "Gal-E1E5" \
+    -q -o "GPS-L1L5" \
     -P "$FILTER" \
-    --fp $RINEX \
-    filegen --csv
+    --fp test_resources/OBS/V3/$RINEX_A \
+    diff --csv test_resources/OBS/V3/$RINEX_B
