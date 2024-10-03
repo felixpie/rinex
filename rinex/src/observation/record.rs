@@ -452,14 +452,11 @@ fn parse_v2(
 
         if obs_ptr >= observables.len() {
             // we're done with current vehicle
-            // build data
-            data.insert(sv, inner.clone());
-            inner.clear(); // prepare for next vehicle
             obs_ptr = 0;
             //identify next vehicle
             if sv_ptr >= systems.len() {
                 // last vehicle
-                return data;
+                return ret;
             }
             // identify next vehicle
             let start = sv_ptr;
@@ -508,7 +505,7 @@ fn parse_v2(
             //println!("{:?}", observables); // DEBUG
         }
     } // for all lines provided
-    data
+    ret
 }
 
 /*
@@ -539,7 +536,6 @@ fn parse_v3(
             //println!("SV: {} OBSERVABLES: {:?}", sv, observables); // DEBUG
             if let Some(observables) = observables {
                 let nb_obs = line.len() / observable_width;
-                inner.clear();
                 let mut rem = line;
                 for i in 0..nb_obs {
                     if i == observables.len() {
