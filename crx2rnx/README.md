@@ -45,3 +45,32 @@ crx2rnx --fp ../test_resoures/CRNX/V1/wsra0010.21d \
 crx2rnx -f ../test_resoures/CRNX/V3/ACOR00ESP_R_20213550000_01D_30S_MO.crx \
     -o /tmp/output.rnx # standard V3 extension
 ```
+
+## JavaScript Function
+
+A JavaScript function `convertCrxToRnx` is provided to convert compact RINEX to RINEX format using WebAssembly.
+
+### Usage
+
+1. Install the required dependencies:
+
+```bash
+npm install fs path
+```
+
+2. Import the `convertCrxToRnx` function and use it in your JavaScript code:
+
+```javascript
+const convertCrxToRnx = require('./convertCrxToRnx');
+
+const inputFilePath = 'path/to/compact_rinex.crx';
+const outputFilePath = 'path/to/output_rinex.rnx';
+
+convertCrxToRnx(inputFilePath, outputFilePath)
+  .then(() => {
+    console.log('Conversion completed successfully.');
+  })
+  .catch((error) => {
+    console.error('Error during conversion:', error);
+  });
+```
